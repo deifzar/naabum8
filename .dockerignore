@@ -1,0 +1,12 @@
+bin
+*/log/*.log
+*/log/*.log.gz
+examples
+naabum8
+*/tmp/*
+*.log
+*.cfg
+*.yml
+*.yaml
+dockerfile
+.dockerignore

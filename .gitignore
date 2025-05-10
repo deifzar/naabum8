@@ -1,0 +1,27 @@
+# binary file
+/naabum8
+
+# configuration files
+/configuration.yaml
+
+# other session files
+resume.cfg
+
+# bin folder
+bin/*
+# exception to the rule
+!bin/.gitkeep
+!bin/dockerfile
+
+# log folder
+log/*
+!log/.gitkeep
+
+# temp folder
+tmp/*
+# exception to the rule
+!tmp/.gitkeep 
+
+# discord
+discord/*
+

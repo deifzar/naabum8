@@ -1,0 +1,597 @@
+package controller8
+
+import (
+	"context"
+	"database/sql"
+	"deifzar/naabum8/pkg/db8"
+	"deifzar/naabum8/pkg/log8"
+	"deifzar/naabum8/pkg/model8"
+	"deifzar/naabum8/pkg/orchestrator8"
+	"deifzar/naabum8/pkg/utils"
+	"errors"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/bwmarrin/discordgo"
+	"github.com/gin-gonic/gin"
+	"github.com/projectdiscovery/naabu/v2/pkg/result"
+	"github.com/projectdiscovery/naabu/v2/pkg/runner"
+	"github.com/spf13/viper"
+
+	"github.com/gofrs/uuid/v5"
+)
+
+type Controller8Naabum8 struct {
+	Db            *sql.DB
+	Config        *viper.Viper
+	runnerOptions *runner.Options
+	OutputResult  model8.Model8Results8Interface
+}
+
+func NewController8Naabum8(db *sql.DB, cnfg *viper.Viper) Controller8Naabum8Interface {
+	return &Controller8Naabum8{Db: db, Config: cnfg}
+}
+
+// Launch port scan across all the enabled systems
+func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
+	// Check that RabbitMQ relevant Queue is available.
+	// If relevant queue does not exist, inform the user that there is one Naabum8 running at this moment and advise the user to wait for the latest results.
+	orchestrator8, err := orchestrator8.NewOrchestrator8()
+	if err != nil {
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		log8.BaseLogger.Fatal().Msg("Error connecting to the RabbitMQ server.")
+	}
+	amqp8 := orchestrator8.GetAmqp()
+	queue_consumer := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Queue")
+	qargs_consumer := m.Config.GetStringMap("ORCHESTRATORM8.naabum8.Queue-arguments")
+	exchange := m.Config.GetStringSlice("ORCHESTRATORM8.katanam8.Queue")[0]
+	if amqp8.ExistQueue(queue_consumer[1], qargs_consumer) {
+		DB := m.Db
+		// Set Runner options from config file.
+		err := m.initRunnerOptions()
+		if err != nil {
+			// move on and call katanam8 scan
+			orchestrator8.PublishMessageToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan")
+			log8.BaseLogger.Debug().Stack().Msg(err.Error())
+			log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan failed - Init runner options")
+			c.JSON(http.StatusInternalServerError, gin.H{"status": "failed", "msg": "Naabum8 Scan failed - Something wrong with the runner options"})
+			return
+		}
+		hostname8 := db8.NewDb8Hostname8(DB)
+		hostname8ModelSlice, err := hostname8.GetAllEnabled()
+		if err != nil {
+			// move on and call katanam8 scan
+			orchestrator8.PublishMessageToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan")
+			log8.BaseLogger.Debug().Stack().Msg(err.Error())
+			log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan - Failed to get the hostnames in scope.")
+			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Naabum8 scan failed - Something wrong fetching the hostnames in scope."})
+			return
+		}
+		if len(hostname8ModelSlice) < 1 {
+			orchestrator8.PublishMessageToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan")
+			log8.BaseLogger.Info().Msg("Naabu8 scans success. No targets in scope.")
+			c.JSON(http.StatusAccepted, gin.H{"status": "success", "msg": "Naabum8 scans success. No targets in scope."})
+			return
+		}
+		// add hostnames to scan
+		for _, h := range hostname8ModelSlice {
+			m.runnerOptions.Host = append(m.runnerOptions.Host, h.Name)
+		}
+		// // cancel consumer
+		// err = orchestrator8.DeactivateConsumerByService("naabum8")
+		// if err != nil {
+		// 	// move on and call naabum8 scan
+		// 	orchestrator8.PublishMessageToExchangeAndCloseChannelConnection(queue_publisher[0], "cptm8.katanam8.get.scan")
+		// 	log8.BaseLogger.Error().Msg("HTTP 500 Response - Naabum8 Full scans failed - Error cancelling the RabbitMQ consumer for `naabum8` before launching scan.")
+		// 	c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Naabum8 Full scans failed. Error cancelling the RabbitMQ consumer."})
+		// 	return
+		// }
+		// bring the queue back with no consumers
+		err = orchestrator8.ActivateQueueByService("naabum8")
+		if err != nil {
+			orchestrator8.PublishMessageToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan")
+			log8.BaseLogger.Fatal().Msg("HTTP 500 Response - Naabum8 scans failed - Error bringing up the RabbitMQ queues for the Naabum8 service.")
+			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Num8 Scans failed. Error bringing up the RabbitMQ queues for the Naabum8 service."})
+			return
+		}
+		log8.BaseLogger.Info().Msg("Naabum8 scans API call success")
+		c.JSON(http.StatusOK, gin.H{"msg": "Naabum8 scans success ... Check notifications for scans updates."})
+		// scan
+		go m.runNaabu8(true, orchestrator8, true)
+	} else {
+		// move on and call katanam8 scan
+		orchestrator8.PublishMessageToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan")
+		c.JSON(http.StatusForbidden, gin.H{"status": "forbidden", "msg": "Num8 Scans failed - Launching Naabum8 Scan is not possible at this moment due to non-existent RabbitMQ queues."})
+		log8.BaseLogger.Info().Msg("Naabum8 Scan API call forbidden")
+		return
+	}
+}
+
+// Launch port scan across all the enabled systems under the main domain
+func (m *Controller8Naabum8) Naabum8Domain(c *gin.Context) {
+	DB := m.Db
+	var uri model8.Domain8Uri
+	if err := c.ShouldBindUri(&uri); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Naabum8 Scan Domain failed - Check URL parameters."})
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		log8.BaseLogger.Info().Msg("400 HTTP Response - Naabum8 Scan Domain")
+		return
+	}
+	// Set Runner options from config file.
+	err := m.initRunnerOptions()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Naabum8 Scan Domain failed - Init runner options failed"})
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan Domain - Init runner options failed")
+		return
+	}
+	// Get hostnames by domain from DB
+	hostname8 := db8.NewDb8Hostname8(DB)
+	id, err := uuid.FromString(uri.ID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Naabum8 Scan Domain failed - Check UUID URL parameters."})
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		log8.BaseLogger.Info().Msg("400 HTTP Response - Naabum8 Scan Domain - UUID URL parameters wrong")
+		return
+	}
+	get, err := hostname8.GetAllEnabledByParentID(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Naabum8 Scan Domain -> Failed get hostnames"})
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan Domain - Something wrong fetching hostnames")
+		return
+	}
+	if len(get) < 1 {
+		log8.BaseLogger.Warn().Msg("202 HTTP Response - Naabum8 Scan Domain - No hostnames to scan.")
+		c.JSON(http.StatusAccepted, gin.H{"status": "success", "data": nil, "msg": "Naabum8 Scan Domain - Not hostnames to scan."})
+		return
+	}
+	// add hostnames to scan
+	for _, h := range get {
+		m.runnerOptions.Host = append(m.runnerOptions.Host, h.Name)
+	}
+	// Launch scan for all hostnames under the inquired domanin
+	c.JSON(http.StatusOK, gin.H{"status": "success", "data": nil, "msg": "OK! Launching port scans ... Check notifications for scans updates."})
+	log8.BaseLogger.Info().Msg("Launching port scans across one domain.")
+	go m.runNaabu8(false, nil, true)
+}
+
+// Launch port scan across the hostnames submitted in the POST body
+func (m *Controller8Naabum8) Naabum8Hostnames(c *gin.Context) {
+	DB := m.Db
+	var post model8.PostHostname8
+	if err := c.ShouldBindJSON(&post); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "failed", "msg": "Naabum8 scan failed - Check body parameters."})
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		log8.BaseLogger.Info().Msg("400 HTTP Response - Naabum8 Scan Hostnames - Check URL parameters.")
+		return
+	}
+	// Set Runner options from config file.
+	err := m.initRunnerOptions()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "failed", "msg": "Naabum8 Scan against hostname -> Init runner options failed"})
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan Hostnames - Init runner options failed")
+		return
+	}
+	hostname8 := db8.NewDb8Hostname8(DB)
+	// Verify that the post request has not been tampered.
+	if hostname8.ValidPostBody(post) {
+		// add hostnames to scan
+		for _, p := range post.Target {
+			m.runnerOptions.Host = append(m.runnerOptions.Host, p.Name)
+		}
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "failed", "msg": "the hosts in the request do not seem valid."})
+		log8.BaseLogger.Info().Msg("400 HTTP Response - Naabum8 Scan Hostnames - the hosts in the request do not seem valid.")
+		return
+	}
+	if m.runnerOptions.Host == nil {
+		log8.BaseLogger.Warn().Msg("202 HTTP Response - Naabum8 Scan Hostnames - No hostnames to scan.")
+		c.JSON(http.StatusAccepted, gin.H{"status": "success", "data": nil, "msg": "Naabum8 Scan Hostnames - Not hostnames to scan."})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"msg": "OK! Launching port scans ... Check notifications for scans updates."})
+	log8.BaseLogger.Info().Msg("Launching port scans across specific hostnames.")
+	go m.runNaabu8(false, nil, true)
+	// Launch scan for the hostnames included in POST
+}
+
+func (m *Controller8Naabum8) initRunnerOptions() error {
+	var err error
+	// Init model8 results8
+	m.OutputResult = model8.NewModel8Result8()
+
+	// Output file
+	// currenttime := time.Now()
+	// suffix := fmt.Sprintf("%d-%d-%d-%d-%d", currenttime.Year(), currenttime.Month(), currenttime.Day(), currenttime.Hour(), currenttime.Minute())
+	// // var writer io.WriteCloser
+	// pathOutput := "./tmp/result-" + suffix + ".json"
+
+	m.runnerOptions = &runner.Options{
+		// Verbose:           o.Verbose,
+		// NoColor:           o.NoColor,
+		JSON: m.Config.GetBool("NAABUM8.JSON"),
+		// Silent:            o.Silent,
+		// Stdin:             o.Stdin,
+		// Verify:            o.Verify,
+		// Version:           o.Version,
+		// Ping:              o.Ping,
+		// Debug:             o.Debug,
+		ExcludeCDN: m.Config.GetBool("NAABUM8.ExcludeCDN"),
+		// Nmap:              o.Nmap,
+		// InterfacesList:    o.InterfacesList,
+		// Retries:           o.Retries,
+		Rate:       m.Config.GetInt("NAABUM8.Rate"),
+		Timeout:    m.Config.GetInt("NAABUM8.Timeout"),
+		WarmUpTime: m.Config.GetInt("NAABUM8.WarmUpTime"),
+		// Host:       m.Cnfg.NAABUM8.Host,
+		// HostsFile:         o.HostsFile,
+		// Output: m.Cnfg.NAABUM8.Output,
+		// Output: pathOutput,
+		Ports: m.Config.GetString("NAABUM8.Ports"),
+		// PortsFile:         o.PortsFile,
+		// ExcludePorts:      o.ExcludePorts,
+		// ExcludeIps:        o.ExcludeIps,
+		// ExcludeIpsFile:    o.ExcludeIpsFile,
+		// TopPorts:          o.TopPorts,
+		// PortThreshold:     o.PortThreshold,
+		// SourceIP:          o.SourceIP,
+		// SourcePort:        o.SourcePort,
+		// Interface:         o.Interface,
+		// ConfigFile:        o.ConfigFile,
+		NmapCLI: m.Config.GetString("NAABUM8.NmapCLI"),
+		Threads: m.Config.GetInt("NAABUM8.Threads"),
+		// EnableProgressBar: o.EnableProgressBar,
+		// StatsInterval:     o.StatsInterval,
+		ScanAllIPS: m.Config.GetBool("NAABUM8.ScanAllIPS"),
+		IPVersion:  m.Config.GetStringSlice("NAABUM8.IPVersion"),
+		ScanType:   m.Config.GetString("NAABUM8.ScanType"),
+		Proxy:      m.Config.GetString("NAABUM8.Proxy"),
+		ProxyAuth:  m.Config.GetString("NAABUM8.ProxyAuth"),
+		// Resolvers:         o.Resolvers,
+		// // baseResolvers:               o.baseResolvers,
+		OnResult: func(hr *result.HostResult) {
+			for _, p := range hr.Ports {
+				m.OutputResult.AddPort(hr.Host, hr.IP, p)
+			}
+		},
+		// CSV:    o.CSV,
+		// Resume: o.Resume,
+		// // ResumeCfg:                   o.ResumeCfg,
+		// Stream:                      o.Stream,
+		// Passive:                     o.Passive,
+		// OutputCDN:                   o.OutputCDN,
+		// HealthCheck:                 o.HealthCheck,
+		// OnlyHostDiscovery:           o.OnlyHostDiscovery,
+		SkipHostDiscovery: m.Config.GetBool("NAABUM8.SkipHostDiscovery"),
+		// TcpSynPingProbes:            o.TcpSynPingProbes,
+		// TcpAckPingProbes:            o.TcpAckPingProbes,
+		// IcmpEchoRequestProbe:        o.IcmpEchoRequestProbe,
+		// IcmpTimestampRequestProbe:   o.IcmpTimestampRequestProbe,
+		// IcmpAddressMaskRequestProbe: o.IcmpAddressMaskRequestProbe,
+		// ArpPing:                     o.ArpPing,
+		// IPv6NeighborDiscoveryPing:   o.IPv6NeighborDiscoveryPing,
+		// DisableStdin:                o.DisableStdin,
+		// ServiceDiscovery:            o.ServiceDiscovery,
+		// ServiceVersion:              o.ServiceVersion,
+		// ReversePTR:                  o.ReversePTR,
+		// DisableUpdateCheck:          o.DisableUpdateCheck,
+		// MetricsPort:                 o.MetricsPort,
+	}
+
+	// if o.InputReadTimeout != "" {
+	// 	rO.InputReadTimeout, err = timeutil.ParseDuration(o.InputReadTimeout)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// }
+
+	return err
+}
+
+func (m *Controller8Naabum8) runNaabu8(fullscan bool, orch8 orchestrator8.Orchestrator8Interface, firstrun bool) {
+
+	naabuM88Discord := model8.NewModel8Discord8(
+		m.Config.GetString("Discord.webhookURL"),
+		m.Config.GetString("Discord.webhookID"),
+		m.Config.GetString("Discord.webhookName"),
+		m.Config.GetString("Discord.webhookToken"),
+		m.Config.GetString("Discord.botToken"))
+	err := naabuM88Discord.InitialiseChannelID()
+	if err != nil {
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		return
+	}
+	discordBot, err := discordgo.New("Bot " + naabuM88Discord.GetBotToken())
+	if err != nil {
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		return
+	}
+	err = m.runnerOptions.ValidateOptions()
+	if err != nil {
+		discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), err.Error())
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		return
+	}
+	discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), ":desktop: Port scans are about to kick off :dog2:")
+	discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), ":regional_indicator_g: :regional_indicator_o: !")
+	naabuRunner, err := runner.NewRunner(m.runnerOptions)
+	if err != nil {
+		discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), "Error when initialising the runner: "+err.Error())
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		return
+	}
+	defer naabuRunner.Close()
+	err = naabuRunner.RunEnumeration(context.TODO())
+	log8.BaseLogger.Info().Msg("Naabum8 scans running.")
+	if err != nil {
+		discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), "Error after attempt of launch: "+err.Error())
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		return
+	}
+	discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), ":checkered_flag: Port scan has finished. :grin: :sweat_drops:")
+	if firstrun && m.OutputResult.IsEmpty() {
+		log8.BaseLogger.Info().Msg("Port scan has finished with empty results")
+		discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), ":checkered_flag: Port scan has finished with empty results. :grin: :sweat_drops:")
+		// Is the port scan blocked by an ISP? Run port scan against only port 80 and 443.
+		m.runnerOptions.Ports = "80,443"
+		m.runNaabu8(fullscan, orch8, false)
+	} else {
+		portsHTTPxFormat := m.GetListOfFoundPortsHTTPxXFormat()
+		// Parse Nmap results
+		var nmapHosts []model8.Host
+		nmap, err := os.ReadFile("./tmp/nmap-output.xml")
+		if err != nil {
+			log8.BaseLogger.Debug().Stack().Msg(err.Error())
+			log8.BaseLogger.Warn().Msgf("Error reading the nmap output")
+		} else {
+			nmapObj, err := utils.NmapParse(nmap)
+			if err != nil {
+				log8.BaseLogger.Debug().Stack().Msg(err.Error())
+				log8.BaseLogger.Warn().Msgf("Error parsing the nmap output")
+			} else {
+				nmapHosts = nmapObj.Hosts
+			}
+		}
+		m.workWithNaabuAndNmapResults(nmapHosts)
+		// Enumerating HTTP endpoints with HTTPx
+		contrHttpx8 := NewController8Httpx8(m.Db, m.runnerOptions.Host, portsHTTPxFormat)
+		contrHttpx8.InitRunnerOptions()
+		err = contrHttpx8.Run()
+		if err != nil {
+			discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), "Error ocurred launching HTTPx: "+err.Error())
+			log8.BaseLogger.Debug().Stack().Msg(err.Error())
+			// Send a notification informing that something is wrong with the enumeration of the HTTP endpoints
+		}
+		err = contrHttpx8.UpdateDB()
+		if err != nil {
+			discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), "Error after uploading HTTP endpoints: "+err.Error())
+			log8.BaseLogger.Debug().Stack().Msg(err.Error())
+			// Send a notification informing that something is wrong with the HTTP endpoints and the database
+		}
+		discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), "HTTP endpoints successfully updated.")
+	}
+	// publish RabbitMQ message for katanam8 only if the Naabum8 scan is full
+	if fullscan {
+		// call katanam8 scan
+		exchange := m.Config.GetStringSlice("ORCHESTRATORM8.katanam8.Queue")[0]
+		orch8.PublishMessageToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan")
+	}
+	// discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), m.OutputResult.JSONEncodeToString())
+}
+
+func (m *Controller8Naabum8) updateService8AndHostnameinfo8ForTargetDB(hostname8 model8.Hostname8, service8List []model8.Service8, hostnameinfo8List []model8.Hostnameinfo8, softslice map[string]map[int]string) error {
+	DB := m.Db
+	serviceDB := db8.NewDb8Service8(DB)
+	hostnameinfoDB := db8.NewDb8Hostnameinfo8(DB)
+	// Insert hostname Info
+	_, err := hostnameinfoDB.InsertBatch(hostnameinfo8List)
+	if err != nil {
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		log8.BaseLogger.Error().Msgf("Error when inserting hostname info '%s' in DB\n", hostname8.Name)
+		return err
+	}
+	// Set all hostname's services `live` column as FALSE
+	err = serviceDB.SetLiveColumnByHostnameID(false, hostname8.Id)
+	if err != nil {
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		log8.BaseLogger.Error().Msgf("Error when setting services live as FALSE for the hostname '%s' in DB\n", hostname8.Name)
+		return err
+	}
+	// Update or insert found hostname's services `live` column as TRUE.
+	err = serviceDB.InsertBatch(service8List)
+	if err != nil {
+		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		log8.BaseLogger.Error().Msgf("Error when inserting services from the hostname '%s' in DB\n", hostname8.Name)
+		return err
+	}
+	// update software details in Hostnameinfo
+	if len(softslice) > 0 {
+		for protocol, portslice := range softslice {
+			if len(portslice) > 0 {
+				for port, soft := range portslice {
+					if soft != "" {
+						latestsoftware, err := hostnameinfoDB.GetSoftware(hostname8.Id, protocol, port)
+						if err != nil {
+							log8.BaseLogger.Debug().Stack().Msg(err.Error())
+							log8.BaseLogger.Error().Msgf("Error when fetching software from the hostname '%s' in DB\n", hostname8.Name)
+							return err
+						}
+						latestsoftware = append(latestsoftware, soft)
+						latestsoftware = utils.RemoveDuplicates(latestsoftware)
+						_, err = hostnameinfoDB.UpdateSoftware(latestsoftware, hostname8.Id, protocol, port)
+						if err != nil {
+							log8.BaseLogger.Debug().Stack().Msg(err.Error())
+							log8.BaseLogger.Error().Msgf("Error when updating software from the hostname '%s' in DB\n", hostname8.Name)
+							return err
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (m *Controller8Naabum8) setService8AndHostnameinfo8ForTarget(hostname string, nmapHosts []model8.Host) ([]model8.Service8, []model8.Hostnameinfo8, map[string]map[int]string, error) {
+	if m.OutputResult.HasIPSFromHostname(hostname) {
+		if m.OutputResult.HasIPsPorts(hostname) {
+			DB := m.Db
+			hostnameDB := db8.NewDb8Hostname8(DB)
+			h, err := hostnameDB.GetOneHostnameByName(hostname)
+			if err != nil {
+				log8.BaseLogger.Debug().Stack().Msg(err.Error())
+				log8.BaseLogger.Error().Msgf("Error fetching the hostname '%s' from DB when analysing results\n", hostname)
+				return nil, nil, nil, err
+			} else {
+				var hostnameinfo8List []model8.Hostnameinfo8
+				var service8List []model8.Service8
+				softslice := make(map[string]map[int]string)
+				softslice["tcp"] = make(map[int]string)
+				softslice["udp"] = make(map[int]string)
+				for r := range m.OutputResult.GetIPsPorts(hostname) {
+					addressfound := false
+					// finding hostname address in Nmap results.
+					for _, nmaphost := range nmapHosts {
+						for _, nmapaddress := range nmaphost.Addresses {
+							if strings.EqualFold(r.IP, nmapaddress.Addr) {
+								addressfound = true
+								break
+							}
+						}
+						if addressfound {
+							// mapping ports, services and software from Nmap results
+							for _, p := range r.Ports {
+								for _, nmapport := range nmaphost.Ports {
+									if nmapport.PortId == p.Port && strings.EqualFold(strings.ToLower(nmapport.Protocol), strings.ToLower(p.Protocol.String())) {
+										service := strings.ToLower(nmapport.Service.Name)
+										if nmapport.Service.Product != "" {
+											if nmapport.Service.Version != "" {
+												softslice[strings.ToLower(p.Protocol.String())][p.Port] = nmapport.Service.Product + " " + nmapport.Service.Version
+											} else {
+												softslice[strings.ToLower(p.Protocol.String())][p.Port] = nmapport.Service.Product
+											}
+										}
+										service8List = append(service8List, model8.Service8{IPaddress: r.IP, Protocol: strings.ToLower(p.Protocol.String()), Port: uint(p.Port), Service: service, Tls: p.TLS, Live: true, Hostnameid: h.Id})
+
+										break
+									}
+								}
+								hostnameinfo8List = append(hostnameinfo8List, model8.Hostnameinfo8{Hostnameid: h.Id, Port: uint(p.Port), Protocol: strings.ToLower(p.Protocol.String())})
+							}
+						}
+					}
+				}
+				return service8List, hostnameinfo8List, softslice, nil
+			}
+		}
+		return nil, nil, nil, errors.New("target does not have ports open")
+	}
+	return nil, nil, nil, errors.New("target does not have IP address")
+}
+
+func (m *Controller8Naabum8) workWithNaabuAndNmapResults(nmapHosts []model8.Host) {
+	if !m.OutputResult.IsEmpty() {
+		for _, target := range m.runnerOptions.Host {
+			service8List, hostnameinfo8List, softslice, err := m.setService8AndHostnameinfo8ForTarget(target, nmapHosts)
+			if err != nil {
+				continue
+			}
+			DB := m.Db
+			hostnameDB := db8.NewDb8Hostname8(DB)
+			h, err := hostnameDB.GetOneHostnameByName(target)
+			if err != nil {
+				continue
+			}
+			m.updateService8AndHostnameinfo8ForTargetDB(h, service8List, hostnameinfo8List, softslice)
+		}
+	}
+}
+
+func (m *Controller8Naabum8) GetListOfFoundPortsHTTPxXFormat() string {
+	var portList []string
+	var portHTTPx string
+	if !m.OutputResult.IsEmpty() {
+		for _, target := range m.runnerOptions.Host {
+			if m.OutputResult.HasIPSFromHostname(target) {
+				if m.OutputResult.HasIPsPorts(target) {
+					for r := range m.OutputResult.GetIPsPorts(target) {
+						for _, p := range r.Ports {
+							portList = append(portList, "http:"+strconv.Itoa(p.Port), "https:"+strconv.Itoa(p.Port))
+						}
+					}
+				}
+			}
+		}
+		portList = utils.RemoveDuplicates(portList)
+		portHTTPx = strings.Join(portList, ",")
+	}
+	return portHTTPx
+}
+
+// func (m *Controller8Naabum8) RabbitMQBringConsumerBackAndPublishMessage() error {
+// 	// RabbitMQ queue and consumer for naabum8 should be back to be available.
+// 	orchestrator8, err := orchestrator8.NewOrchestrator8()
+// 	amqp8 := orchestrator8.GetAmqp()
+// 	defer amqp8.CloseConnection()
+// 	defer amqp8.CloseChannel()
+// 	if err != nil {
+// 		log8.BaseLogger.Debug().Msg(err.Error())
+// 		log8.BaseLogger.Fatal().Msg("Error connecting to the RabbitMQ server.")
+// 		return err
+// 	}
+// 	orchestrator8.CreateHandleCPTM8()
+// 	orchestrator8.ActivateConsumerByService("naabum8")
+
+// 	// Publish message
+// 	queue := m.Config.GetStringSlice("ORCHESTRATORM8.katanam8.Queue")
+// 	log8.BaseLogger.Info().Msg("RabbitMQ publishing message to queue for KatanaM8 service.")
+// 	err = amqp8.Publish(queue[0], "cptm8.katanam8.get.scan", "")
+// 	if err != nil {
+// 		log8.BaseLogger.Debug().Msg(err.Error())
+// 		log8.BaseLogger.Error().Msgf("rabbitMQ publishing message to queue for KatanaM8 service failed")
+// 		return err
+// 	}
+// 	log8.BaseLogger.Info().Msg("RabbitMQ publishing message to KatanaM8 queue service success.")
+// 	return nil
+// }
+
+// func (m *Controller8Naabum8) RabbitMQBringConsumerBack() error {
+
+// 	// RabbitMQ queue and consumer for Naabum8 should be back to be available.
+// 	orchestrator8, err := orchestrator8.NewOrchestrator8()
+// 	if err != nil {
+// 		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+// 		log8.BaseLogger.Fatal().Msg("Error connecting to the RabbitMQ server.")
+// 		return err
+// 	}
+// 	orchestrator8.CreateHandleCPTM8()
+// 	orchestrator8.ActivateConsumerByService("naabum8")
+
+// 	return nil
+// }
+
+// func (m *Controller8Naabum8) RabbitMQPublishMessage() error {
+// 	orchestrator8, err := orchestrator8.NewOrchestrator8()
+// 	if err != nil {
+// 		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+// 		log8.BaseLogger.Fatal().Msg("Error connecting to the RabbitMQ server.")
+// 		return err
+// 	}
+// 	amqp8 := orchestrator8.GetAmqp()
+// 	defer amqp8.CloseChannel()
+// 	defer amqp8.CloseConnection()
+// 	queue := m.Config.GetStringSlice("ORCHESTRATORM8.katanam8.Queue")
+// 	log8.BaseLogger.Info().Msg("RabbitMQ publishing message to queue for KatanaM8 service.")
+// 	err = amqp8.Publish(queue[0], "cptm8.katanam8.get.scan", "")
+// 	if err != nil {
+// 		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+// 		log8.BaseLogger.Error().Msgf("rabbitMQ publishing message to queue for KatanaM8 service failed")
+// 		return err
+// 	}
+// 	log8.BaseLogger.Info().Msg("RabbitMQ publishing message to KatanaM8 queue service success.")
+// 	return nil
+// }
