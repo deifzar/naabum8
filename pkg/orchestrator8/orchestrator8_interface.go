@@ -8,7 +8,7 @@ import amqpM8 "deifzar/naabum8/pkg/amqpM8"
 type Orchestrator8Interface interface {
 	InitOrchestrator() error
 	GetAmqp() amqpM8.AmqpM8Interface
-	CreateHandleAPICall()
+	CreateHandleAPICallByService(service string)
 	ActivateQueueByService(service string) error
 	ActivateConsumerByService(service string)
 	PublishMessageToExchangeAndCloseChannelConnection(exchange string, message string) error

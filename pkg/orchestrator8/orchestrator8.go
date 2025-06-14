@@ -62,7 +62,7 @@ func (o *Orchestrator8) GetAmqp() amqpM8.AmqpM8Interface {
 }
 
 // This method defines the actions that customers carry when messages get published to the `cptm8` exchange.
-func (o *Orchestrator8) CreateHandleAPICall() {
+func (o *Orchestrator8) CreateHandleAPICallByService(service string) {
 	handle := func(msg amqp.Delivery) error {
 		services := o.Config.GetStringMapString("ORCHESTRATORM8.Services")
 		routingKey := msg.RoutingKey // cptm8.asmm8.get.scan. or cptm.asmm8.post.scan or cptm8.naabum8.get.scan/domain/1337 or cptm8.num8.post.endpoint/17/scan
@@ -92,7 +92,8 @@ func (o *Orchestrator8) CreateHandleAPICall() {
 		log8.BaseLogger.Info().Msgf("RabbitMQ - handler for routing key `%s` - Success with HTTP request: %s.", routingKey, requestURL)
 		return nil
 	}
-	o.Amqp.AddHandler("apicall", handle)
+	queue := o.Config.GetStringSlice("ORCHESTRATORM8." + service + ".Consumer")
+	o.Amqp.AddHandler(queue[1], handle)
 }
 
 func (o *Orchestrator8) ActivateQueueByService(service string) error {
@@ -113,12 +114,11 @@ func (o *Orchestrator8) ActivateConsumerByService(service string) {
 		qname := p[0]
 		cname := p[1]
 		autoACK, err := strconv.ParseBool(p[2])
-		handleType := p[3]
 		if err != nil {
 			log8.BaseLogger.Warn().Msgf("setting autoACK to `false` due to failure parsing config autoACK value from queue `%s`", qname)
 			autoACK = true
 		}
-		err = o.Amqp.Consume(cname, qname, handleType, autoACK)
+		err = o.Amqp.Consume(cname, qname, autoACK)
 		if err != nil {
 			log8.BaseLogger.Debug().Msg(err.Error())
 			log8.BaseLogger.Error().Msgf("error creating consumer for queue `%s`", qname)
@@ -158,7 +158,7 @@ func (o *Orchestrator8) PublishMessageToExchangeAndActivateConsumerByService(ser
 	log8.BaseLogger.Info().Msgf("RabbitMQ publishing message `%s` success!", message)
 	// Activate queue and consumer but do not close the connection so the consumer remains active
 	o.ActivateQueueByService(service)
-	o.CreateHandleAPICall()
+	o.CreateHandleAPICallByService(service)
 	o.ActivateConsumerByService(service)
 	return nil
 }
