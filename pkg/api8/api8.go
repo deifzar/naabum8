@@ -54,7 +54,7 @@ func (a *Api8) Init() error {
 		log8.BaseLogger.Error().Msg("Error bringing up the RabbitMQ queues for the `naabum8` service.")
 		return err
 	}
-	orchestrator8.CreateHandleAPICall()
+	orchestrator8.CreateHandleAPICallByService("naabum8")
 	orchestrator8.ActivateConsumerByService("naabum8")
 
 	a.Cnfg = v
