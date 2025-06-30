@@ -18,7 +18,7 @@ type AmqpM8Imp struct {
 	conn      *amqp.Connection
 	ch        *amqp.Channel
 	queues    map[string]map[string]amqp.Queue // exchange name > queue name > queue object
-	bindings  map[string]map[string]string     // exchange name > queue name > binding key
+	bindings  map[string]map[string][]string   // exchange name > queue name > binding keys
 	exchanges map[string]string                // exchange name > exchange type
 	consumers map[string][]string              // consumer name > queue name, autoack
 
@@ -43,7 +43,7 @@ func NewAmqpM8(location string, port int, username, password string) (AmqpM8Inte
 	h := make(map[string]func(msg amqp.Delivery) error)
 	e := make(map[string]string)
 	q := make(map[string]map[string]amqp.Queue)
-	b := make(map[string]map[string]string)
+	b := make(map[string]map[string][]string)
 	c := make(map[string][]string)
 
 	return &AmqpM8Imp{conn: conn, ch: ch, exchanges: e, queues: q, bindings: b, consumers: c, handler: h}, nil
@@ -60,7 +60,7 @@ func (a *AmqpM8Imp) GetChannel() *amqp.Channel {
 func (a *AmqpM8Imp) GetQueues() map[string]map[string]amqp.Queue {
 	return a.queues
 }
-func (a *AmqpM8Imp) GetBindings() map[string]map[string]string {
+func (a *AmqpM8Imp) GetBindings() map[string]map[string][]string {
 	return a.bindings
 }
 func (a *AmqpM8Imp) GetExchanges() map[string]string {
@@ -75,7 +75,7 @@ func (a *AmqpM8Imp) GetQueueByExchangeNameAndQueueName(exchangeName string, queu
 	return a.queues[exchangeName][queuename]
 }
 
-func (a *AmqpM8Imp) GetBindingByExchangeNameAndQueueName(exchangeName string, queuename string) string {
+func (a *AmqpM8Imp) GetBindingsByExchangeNameAndQueueName(exchangeName string, queuename string) []string {
 	return a.bindings[exchangeName][queuename]
 }
 
@@ -96,9 +96,9 @@ func (a *AmqpM8Imp) SetQueueByExchangeName(exchangeName string, queueName string
 	a.queues[exchangeName][queueName] = queue
 }
 
-func (a *AmqpM8Imp) SetBindingQueueByExchangeName(exchangeName string, queueName string, bindingKey string) {
-	a.bindings[exchangeName] = make(map[string]string)
-	a.bindings[exchangeName][queueName] = bindingKey
+func (a *AmqpM8Imp) SetBindingQueueByExchangeName(exchangeName string, queueName string, bindingKeys []string) {
+	a.bindings[exchangeName] = make(map[string][]string)
+	a.bindings[exchangeName][queueName] = bindingKeys
 }
 
 func (a *AmqpM8Imp) DeclareExchange(exchangeName string, exchangeType string) error {
@@ -122,7 +122,7 @@ func (a *AmqpM8Imp) DeclareExchange(exchangeName string, exchangeType string) er
 	log8.BaseLogger.Info().Msgf("Exchange successfully created with name `%s`", exchangeName)
 	a.SetExchange(exchangeName, exchangeType)
 	a.queues[exchangeName] = make(map[string]amqp.Queue)
-	a.bindings[exchangeName] = make(map[string]string)
+	a.bindings[exchangeName] = make(map[string][]string)
 	return nil
 }
 
@@ -133,7 +133,7 @@ bindingKey -> "" or string
 queueArgs -> nil or Table
 prefetchCount -> 0 or >1
 */
-func (a *AmqpM8Imp) DeclareQueueAndBind(exchangeName string, queueName string, bindingKey string, prefetchCount int, queueArgs amqp.Table) error {
+func (a *AmqpM8Imp) DeclareQueue(exchangeName string, queueName string, prefetchCount int, queueArgs amqp.Table) error {
 	log8.BaseLogger.Info().Msgf("Creating and binding Queue with name `%s` in Exchange `%s`", queueName, exchangeName)
 	q, err := a.ch.QueueDeclare(
 		queueName, // name
@@ -158,20 +158,26 @@ func (a *AmqpM8Imp) DeclareQueueAndBind(exchangeName string, queueName string, b
 			return fmt.Errorf("queue `%s` failed to set qos control: %w", queueName, err)
 		}
 	}
-	log8.BaseLogger.Info().Msgf("Binding Queue `%s` with Exchange `%s` and Binding key `%s`", queueName, exchangeName, bindingKey)
-	err = a.ch.QueueBind(
-		q.Name,       // queue name
-		bindingKey,   // routing key
-		exchangeName, // exchange
-		false,
-		nil,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to bind queue `%s` with exchange `%s` and binding key `%s`: %w", queueName, exchangeName, bindingKey, err)
+	a.SetQueueByExchangeName(exchangeName, queueName, q)
+	return nil
+}
+
+func (a *AmqpM8Imp) BindQueue(exchangeName string, queueName string, bindingKeys []string) error {
+	log8.BaseLogger.Info().Msgf("Binding Queue `%s` with Exchange `%s` and Binding key `%s`", queueName, exchangeName, bindingKeys)
+	for _, bkey := range bindingKeys {
+		err := a.ch.QueueBind(
+			queueName,    // queue name
+			bkey,         // routing key
+			exchangeName, // exchange
+			false,
+			nil,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to bind queue `%s` with exchange `%s` and binding key `%s`: %w", queueName, exchangeName, bkey, err)
+		}
 	}
 	log8.BaseLogger.Info().Msgf("Success creating and binding Queue `%s` and Exchange `%s`", queueName, exchangeName)
-	a.SetQueueByExchangeName(exchangeName, queueName, q)
-	a.SetBindingQueueByExchangeName(exchangeName, queueName, bindingKey)
+	a.SetBindingQueueByExchangeName(exchangeName, queueName, bindingKeys)
 	return nil
 }
 
@@ -186,7 +192,7 @@ func (a *AmqpM8Imp) ExistQueue(queueName string, queueArgs amqp.Table) bool {
 		queueArgs, // arguments
 	)
 	if err != nil {
-		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		log8.BaseLogger.Debug().Msg(err.Error())
 		log8.BaseLogger.Info().Msgf("Queue `%s` does not exist", queueName)
 		return false
 	}
@@ -202,7 +208,7 @@ func (a *AmqpM8Imp) DeleteQueue(queueName string) error {
 		false,     // noWait
 	)
 	if err != nil {
-		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		log8.BaseLogger.Debug().Msg(err.Error())
 		log8.BaseLogger.Warn().Msgf("Queue `%s` cannot be deleted", queueName)
 		return err
 	}
@@ -213,7 +219,7 @@ func (a *AmqpM8Imp) DeleteQueue(queueName string) error {
 func (a *AmqpM8Imp) CancelConsumer(consumerName string) error {
 	err := a.ch.Cancel(consumerName, true)
 	if err != nil {
-		log8.BaseLogger.Debug().Stack().Msg(err.Error())
+		log8.BaseLogger.Debug().Msg(err.Error())
 		log8.BaseLogger.Warn().Msgf("Consumer `%s` cannot be cancelled", consumerName)
 		return err
 	}

@@ -98,8 +98,19 @@ func (o *Orchestrator8) CreateHandleAPICallByService(service string) {
 
 func (o *Orchestrator8) ActivateQueueByService(service string) error {
 	queue := o.Config.GetStringSlice("ORCHESTRATORM8." + service + ".Queue")
+	bindingkeys := o.Config.GetStringSlice("ORCHESTRATORM8." + service + ".Routing-keys")
 	qargs := o.Config.GetStringMap("ORCHESTRATORM8." + service + ".Queue-arguments")
-	err := o.Amqp.DeclareQueueAndBind(queue[0], queue[1], queue[2], 0, qargs)
+	prefetch_count, err := strconv.Atoi(queue[2])
+	if err != nil {
+		log8.BaseLogger.Debug().Msg(err.Error())
+		return err
+	}
+	err = o.Amqp.DeclareQueue(queue[0], queue[1], prefetch_count, qargs)
+	if err != nil {
+		log8.BaseLogger.Debug().Msg(err.Error())
+		return err
+	}
+	err = o.Amqp.BindQueue(queue[0], queue[1], bindingkeys)
 	if err != nil {
 		log8.BaseLogger.Debug().Msg(err.Error())
 		return err
