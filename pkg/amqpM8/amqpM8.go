@@ -3,16 +3,13 @@ package amqpM8
 import (
 	"context"
 	"deifzar/naabum8/pkg/log8"
+	"deifzar/naabum8/pkg/model8"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
-
-type AmqpM8Message struct {
-	Payload any `json:"payload"`
-}
 
 type AmqpM8Imp struct {
 	conn      *amqp.Connection
@@ -228,8 +225,13 @@ func (a *AmqpM8Imp) CancelConsumer(consumerName string) error {
 }
 
 // if exchangeName and exchangeType are nil. RoutingKey acts as a Queue name.
-func (a *AmqpM8Imp) Publish(exchangeName string, routingKey string, payload any) error {
-	msg := AmqpM8Message{Payload: payload}
+func (a *AmqpM8Imp) Publish(exchangeName string, routingKey string, payload any, source string) error {
+	msg := model8.AmqpM8Message{
+		Channel:   routingKey,
+		Payload:   payload,
+		Timestamp: time.Now(),
+		Source:    source,
+	}
 	bytes, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("publishing into exchange `%s` with routing key `%s` failed to msg json marshal the payload with error: %w", exchangeName, routingKey, err)

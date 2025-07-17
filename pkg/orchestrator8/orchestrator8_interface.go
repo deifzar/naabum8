@@ -11,8 +11,8 @@ type Orchestrator8Interface interface {
 	CreateHandleAPICallByService(service string)
 	ActivateQueueByService(service string) error
 	ActivateConsumerByService(service string)
-	PublishMessageToExchangeAndCloseChannelConnection(exchange string, message string) error
-	PublishMessageToExchangeAndActivateConsumerByService(service string, exchange string, message string) error
+	PublishToExchangeAndCloseChannelConnection(exchange string, routingkey string, payload any, source string) error
+	PublishToExchangeAndActivateConsumerByService(service string, exchange string, routingkey string, payload any, source string) error
 	DeactivateConsumerByService(service string) error
 	// BuildHandlers()
 	// BuildConsumers()

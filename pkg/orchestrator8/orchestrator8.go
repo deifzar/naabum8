@@ -5,6 +5,7 @@ import (
 	amqpM8 "deifzar/naabum8/pkg/amqpM8"
 	"deifzar/naabum8/pkg/configparser"
 	"deifzar/naabum8/pkg/log8"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -146,30 +147,44 @@ func (o *Orchestrator8) DeactivateConsumerByService(service string) error {
 	return err
 }
 
-func (o *Orchestrator8) PublishMessageToExchangeAndCloseChannelConnection(exchange string, message string) error {
+func (o *Orchestrator8) PublishToExchangeAndCloseChannelConnection(exchange string, routingkey string, payload any, source string) error {
 	defer o.Amqp.CloseConnection()
 	defer o.Amqp.CloseChannel()
-	err := o.Amqp.Publish(exchange, message, "")
-	if err != nil {
+	if exchange != "" && routingkey != "" {
+		err := o.Amqp.Publish(exchange, routingkey, payload, source)
+		if err != nil {
+			log8.BaseLogger.Debug().Msg(err.Error())
+			log8.BaseLogger.Error().Msgf("RabbitMQ publishing message `%s` failed!", payload)
+			return err
+		}
+		log8.BaseLogger.Info().Msgf("RabbitMQ publishing message `%s` success!", payload)
+		return nil
+	} else {
+		err := errors.New("impossible to route message to RabbitMQ. Missing paramaters such as exchange and routing key details")
 		log8.BaseLogger.Debug().Msg(err.Error())
-		log8.BaseLogger.Error().Msgf("RabbitMQ publishing message `%s` failed!", message)
+		log8.BaseLogger.Error().Msg("RabbitMQ publishing message has failed due to missing exchange and routing key parameters!")
 		return err
 	}
-	log8.BaseLogger.Info().Msgf("RabbitMQ publishing message `%s` success!", message)
-	return nil
 }
 
-func (o *Orchestrator8) PublishMessageToExchangeAndActivateConsumerByService(service string, exchange string, message string) error {
-	err := o.Amqp.Publish(exchange, message, "")
-	if err != nil {
+func (o *Orchestrator8) PublishToExchangeAndActivateConsumerByService(service string, exchange string, routingkey string, payload any, source string) error {
+	if service != "" && exchange != "" && routingkey != "" {
+		err := o.Amqp.Publish(exchange, routingkey, payload, source)
+		if err != nil {
+			log8.BaseLogger.Debug().Msg(err.Error())
+			log8.BaseLogger.Error().Msgf("RabbitMQ publishing message `%s` failed!", payload)
+			return err
+		}
+		log8.BaseLogger.Info().Msgf("RabbitMQ publishing message `%s` success!", payload)
+		// Activate queue and consumer but do not close the connection so the consumer remains active
+		o.ActivateQueueByService(service)
+		o.CreateHandleAPICallByService(service)
+		o.ActivateConsumerByService(service)
+		return nil
+	} else {
+		err := errors.New("impossible to route message to RabbitMQ. Missing paramaters such as exchange and routing key details")
 		log8.BaseLogger.Debug().Msg(err.Error())
-		log8.BaseLogger.Error().Msgf("RabbitMQ publishing message `%s` failed!", message)
+		log8.BaseLogger.Error().Msg("RabbitMQ publishing message has failed due to missing exchange and routing key parameters!")
 		return err
 	}
-	log8.BaseLogger.Info().Msgf("RabbitMQ publishing message `%s` success!", message)
-	// Activate queue and consumer but do not close the connection so the consumer remains active
-	o.ActivateQueueByService(service)
-	o.CreateHandleAPICallByService(service)
-	o.ActivateConsumerByService(service)
-	return nil
 }

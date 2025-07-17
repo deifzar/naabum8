@@ -21,7 +21,7 @@ type AmqpM8Interface interface {
 	DeclareExchange(exchangeName string, exchangeType string) error
 	DeclareQueue(exchangeName string, queueName string, prefetchCount int, queueArgs amqp.Table) error
 	BindQueue(exchangeName string, queueName string, bindingKeys []string) error
-	Publish(exchangeName string, routingKey string, payload any) error
+	Publish(exchangeName string, routingKey string, payload any, source string) error
 	Consume(consumerName, queueName string, autoACK bool) error
 	ExistQueue(queueName string, queueArgs amqp.Table) bool
 	DeleteQueue(queueName string) error
