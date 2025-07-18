@@ -6,6 +6,7 @@ import (
 	"deifzar/naabum8/pkg/db8"
 	"deifzar/naabum8/pkg/log8"
 	"deifzar/naabum8/pkg/model8"
+	"deifzar/naabum8/pkg/notification8"
 	"deifzar/naabum8/pkg/orchestrator8"
 	"deifzar/naabum8/pkg/utils"
 	"errors"
@@ -53,9 +54,10 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 		err := m.initRunnerOptions()
 		if err != nil {
 			// move on and call katanam8 scan
-			orchestrator8.PublishToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan failed - Init runner options")
+			orchestrator8.PublishToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
+			notification8.Helper.PublishSysErrorNotification("Naabum8Scan - Naabum8 Scan failed - Init runner options", "urgent", "naabum8")
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "failed", "msg": "Naabum8 Scan failed - Something wrong with the runner options"})
 			return
 		}
@@ -63,9 +65,10 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 		hostname8ModelSlice, err := hostname8.GetAllEnabled()
 		if err != nil {
 			// move on and call katanam8 scan
-			orchestrator8.PublishToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan - Failed to get the hostnames in scope.")
+			orchestrator8.PublishToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
+			notification8.Helper.PublishSysErrorNotification("Naabum8Scan - Failed to get the hostnames in scope", "urgent", "naabum8")
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Naabum8 scan failed - Something wrong fetching the hostnames in scope."})
 			return
 		}
@@ -81,8 +84,9 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 		}
 		err = orchestrator8.ActivateQueueByService("naabum8")
 		if err != nil {
-			orchestrator8.PublishToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
 			log8.BaseLogger.Fatal().Msg("HTTP 500 Response - Naabum8 scans failed - Error bringing up the RabbitMQ queues for the Naabum8 service.")
+			orchestrator8.PublishToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
+			notification8.Helper.PublishSysErrorNotification("Naabum8Scan - Error bringing up the RabbitMQ queues for the Naabum8 service", "urgent", "naabum8")
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Num8 Scans failed. Error bringing up the RabbitMQ queues for the Naabum8 service."})
 			return
 		}
@@ -92,9 +96,10 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 		go m.runNaabu8(true, orchestrator8, true)
 	} else {
 		// move on and call katanam8 scan
-		orchestrator8.PublishToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
-		c.JSON(http.StatusForbidden, gin.H{"status": "forbidden", "msg": "Num8 Scans failed - Launching Naabum8 Scan is not possible at this moment due to non-existent RabbitMQ queues."})
 		log8.BaseLogger.Info().Msg("Naabum8 Scan API call forbidden")
+		orchestrator8.PublishToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
+		notification8.Helper.PublishSysErrorNotification("Naabum8Scan - Launching Naabum8 Scan is not possible at this moment due to non-existent RabbitMQ queues.", "urgent", "naabum8")
+		c.JSON(http.StatusForbidden, gin.H{"status": "forbidden", "msg": "Num8 Scans failed - Launching Naabum8 Scan is not possible at this moment due to non-existent RabbitMQ queues."})
 		return
 	}
 }
