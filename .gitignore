@@ -25,3 +25,9 @@ tmp/*
 # discord
 discord/*
 
+# docs folder
+docs/*
+
+# AI
+CLAUDE.md
+
