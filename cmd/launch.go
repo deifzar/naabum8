@@ -6,6 +6,7 @@ package cmd
 import (
 	"deifzar/naabum8/pkg/api8"
 	"deifzar/naabum8/pkg/log8"
+	"deifzar/naabum8/pkg/notification8"
 	"deifzar/naabum8/pkg/utils"
 	"errors"
 	"fmt"
@@ -46,6 +47,7 @@ var launchCmd = &cobra.Command{
 			if err != nil {
 				log8.BaseLogger.Debug().Stack().Msg(err.Error())
 				log8.BaseLogger.Fatal().Msg("Error in `Launch` command line when initialising the API endpoint.")
+				notification8.Helper.PublishSysErrorNotification("Error in `Launch` command line when initialising the API endpoint", "urgent", "naabum8")
 				return err
 			}
 			a.Routes()
