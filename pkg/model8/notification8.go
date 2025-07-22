@@ -31,7 +31,7 @@ const (
 type NotificationMetadata8 struct {
 	Room         string              `json:"room,omitempty"`
 	Relativepath string              `json:"relativepath,omitempty"`
-	Senderid     uuid.UUID           `json:"senderid,omitempty"`
+	Senderid     *uuid.UUID          `json:"senderid,omitempty"`
 	Sendername   string              `json:"sendername,omitempty"`
 	Senderemail  string              `json:"senderemail,omitempty"`
 	Senderimage  string              `json:"senderimage,omitempty"`
@@ -41,12 +41,12 @@ type NotificationMetadata8 struct {
 }
 
 type Notification8 struct {
-	Id         uuid.UUID             `json:"id,omitempty"`
-	Userid     uuid.UUID             `json:"userid,omitempty"`
+	Id         *uuid.UUID            `json:"id,omitempty"`
+	Userid     *uuid.UUID            `json:"userid,omitempty"`
 	Userrole   Roletype              `json:"userrole,omitempty"`
 	Type       Notificationevent     `json:"type"`
 	Message    string                `json:"message"`
 	Metadata   NotificationMetadata8 `json:"metadata,omitempty"`
 	Read       bool                  `json:"read,omitempty"`
-	Created_at time.Time             `json:"created_at,omitempty"`
+	Created_at *time.Time            `json:"created_at,omitempty"`
 }

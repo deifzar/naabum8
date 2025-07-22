@@ -1,4 +1,6 @@
 bin
+*/docs/*
+*/app/*
 */log/*.log
 */log/*.log.gz
 examples

@@ -7,6 +7,9 @@
 # other session files
 resume.cfg
 
+# app folder
+app/*
+
 # bin folder
 bin/*
 # exception to the rule
