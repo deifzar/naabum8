@@ -74,6 +74,7 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 		}
 		if len(hostname8ModelSlice) < 1 {
 			orchestrator8.PublishToExchangeAndCloseChannelConnection(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
+			notification8.Helper.PublishSysWarningNotification("No targets in scope for a port scan. Make sure the client has enabled the scan on newly discovery assets.", "normal", "naabum8")
 			log8.BaseLogger.Info().Msg("Naabu8 scans success. No targets in scope.")
 			c.JSON(http.StatusAccepted, gin.H{"status": "success", "msg": "Naabum8 scans success. No targets in scope."})
 			return

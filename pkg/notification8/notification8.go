@@ -62,7 +62,7 @@ func (NotificationHelper) PublishSecurityNotificationAdmin(message string, sever
 		return fmt.Errorf("failed to create notification service: %w", err)
 	}
 
-	return service.PublishNotification("app.security."+severity, model8.Security, severity, model8.RoleAdmin, message, source)
+	return service.PublishNotification("app.security."+severity, model8.Security, severity, model8.RoleAdmin, source, message)
 }
 
 // PublishErrorNotification sends a `security` notification to the web app to normal users. If severity is `urgent`, `critical` or `high`, the notification will be sent via email too
@@ -72,7 +72,7 @@ func (NotificationHelper) PublishSecurityNotificationUser(message string, severi
 		return fmt.Errorf("failed to create notification service: %w", err)
 	}
 
-	return service.PublishNotification("app.security."+severity, model8.Security, severity, model8.RoleUser, message, source)
+	return service.PublishNotification("app.security."+severity, model8.Security, severity, model8.RoleUser, source, message)
 }
 
 // PublishErrorNotification sends an error notification to admins
@@ -82,7 +82,7 @@ func (NotificationHelper) PublishSysErrorNotification(message string, severity s
 		return fmt.Errorf("failed to create notification service: %w", err)
 	}
 
-	return service.PublishNotification("app.error."+severity, model8.Error, severity, model8.RoleAdmin, message, source)
+	return service.PublishNotification("app.error."+severity, model8.Error, severity, model8.RoleAdmin, source, message)
 }
 
 // PublishWarningNotification sends a warning notification to admins
@@ -92,7 +92,7 @@ func (NotificationHelper) PublishSysWarningNotification(message string, severity
 		return fmt.Errorf("failed to create notification service: %w", err)
 	}
 
-	return service.PublishNotification("app.warning."+severity, model8.Warning, severity, model8.RoleAdmin, message, source)
+	return service.PublishNotification("app.warning."+severity, model8.Warning, severity, model8.RoleAdmin, source, message)
 }
 
 // Global helper instance

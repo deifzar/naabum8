@@ -94,7 +94,7 @@ func (o *Orchestrator8) CreateHandleAPICallByService(service string) {
 		return nil
 	}
 	queue := o.Config.GetStringSlice("ORCHESTRATORM8." + service + ".Consumer")
-	o.Amqp.AddHandler(queue[1], handle)
+	o.Amqp.AddHandler(queue[0], handle)
 }
 
 func (o *Orchestrator8) ActivateQueueByService(service string) error {
