@@ -10,5 +10,13 @@ naabum8
 *.cfg
 *.yml
 *.yaml
+*.md
+.env*
+.vscode
+.idea
 dockerfile
+Dockerfile
 .dockerignore
+.git
+.gitignore
+README.md

@@ -1,9 +1,55 @@
-FROM alpine:3.21.3
-RUN apk upgrade --no-cache \
-    && apk add --no-cache nmap libpcap-dev libcap-setcap bind-tools ca-certificates nmap-scripts
+# Production stage - Hardened Alpine with digest pinning
+FROM alpine:3.20@sha256:77726ef6b57ddf65bb551896826ec38bc3e53f75cdde31354fbffb4f25238ebd
+
+# Security hardening - Install required packages and remove dangerous utilities
+RUN apk upgrade --no-cache && \
+    apk add --no-cache \
+        ca-certificates \
+        libpcap \
+        libcap \
+        nmap \
+        nmap-scripts \
+        bind-tools \
+        tini && \
+    # Remove potentially dangerous utilities
+    rm -rf /bin/su \
+           /bin/mount \
+           /bin/umount \
+           /sbin/mount* \
+           /usr/bin/passwd \
+           /usr/bin/chpasswd \
+           /usr/sbin/adduser \
+           /usr/sbin/deluser \
+           /etc/crontabs \
+           /var/spool/cron && \
+    # Clean package cache and temporary files
+    rm -rf /var/cache/apk/* /tmp/* /var/tmp/* && \
+    # Create secure directories with proper permissions
+    mkdir -p /app/data /tmp && \
+    chmod 1777 /tmp && \
+    chmod 755 /app
+
 WORKDIR /app
-# Before copying the binary, make sure you have set the following capabilities to the binary: 
-# `sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip naabum8`
-COPY naabum8 /usr/local/bin/
-RUN setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip naabum8
-CMD ["naabum8","launch"]
+
+# Copy pre-built binary with secure permissions
+# Note: Binary should be built with: CGO_ENABLED=0 go build -ldflags='-w -s' -o naabum8 .
+COPY naabum8 /usr/local/bin/naabum8
+RUN chmod 755 /usr/local/bin/naabum8 && \
+    # Set capabilities for non-root network operations (fallback - Docker runtime caps preferred)
+    setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip /usr/local/bin/naabum8
+
+# Use tini as init system for proper signal handling
+ENTRYPOINT ["/sbin/tini", "--"]
+
+# Health check with proper command
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD /usr/local/bin/naabum8 help || exit 1
+
+# Metadata
+LABEL maintainer="i@deifzar.me" \
+      version="1.0" \
+      description="NaabuM8 - Hardened Network Scanner (Runtime)" \
+      security.scan="required-root-privileges"
+
+# Default command
+CMD ["naabum8", "launch"]
