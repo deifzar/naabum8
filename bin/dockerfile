@@ -1,27 +1,28 @@
 # Production stage - Hardened Alpine with digest pinning
-FROM alpine:3.20@sha256:77726ef6b57ddf65bb551896826ec38bc3e53f75cdde31354fbffb4f25238ebd
+# FROM alpine:3.20@sha256:77726ef6b57ddf65bb551896826ec38bc3e53f75cdde31354fbffb4f25238ebd
+FROM alpine:3.20
 
 # Security hardening - Install required packages and remove dangerous utilities
 RUN apk upgrade --no-cache && \
     apk add --no-cache \
-        ca-certificates \
-        libpcap \
-        libcap \
-        nmap \
-        nmap-scripts \
-        bind-tools \
-        tini && \
+    ca-certificates \
+    libpcap \
+    libcap \
+    nmap \
+    nmap-scripts \
+    bind-tools \
+    tini && \
     # Remove potentially dangerous utilities
     rm -rf /bin/su \
-           /bin/mount \
-           /bin/umount \
-           /sbin/mount* \
-           /usr/bin/passwd \
-           /usr/bin/chpasswd \
-           /usr/sbin/adduser \
-           /usr/sbin/deluser \
-           /etc/crontabs \
-           /var/spool/cron && \
+    /bin/mount \
+    /bin/umount \
+    /sbin/mount* \
+    /usr/bin/passwd \
+    /usr/bin/chpasswd \
+    /usr/sbin/adduser \
+    /usr/sbin/deluser \
+    /etc/crontabs \
+    /var/spool/cron && \
     # Clean package cache and temporary files
     rm -rf /var/cache/apk/* /tmp/* /var/tmp/* && \
     # Create secure directories with proper permissions
@@ -47,9 +48,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # Metadata
 LABEL maintainer="i@deifzar.me" \
-      version="1.0" \
-      description="NaabuM8 - Hardened Network Scanner (Runtime)" \
-      security.scan="required-root-privileges"
+    version="1.0" \
+    description="NaabuM8 - Hardened Network Scanner (Runtime)" \
+    security.scan="required-root-privileges"
 
 # Default command
 CMD ["naabum8", "launch"]
