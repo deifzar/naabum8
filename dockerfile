@@ -2,7 +2,7 @@
 # FROM golang:1.23-alpine@sha256:b538dc78c7e5dd860fcebc49c70716a38c8263b8a3b7b5c4b8e9c7a3f7a1b8c2 AS build-env
 FROM golang:1.23-alpine
 # Install build dependencies
-RUN apk add --no-cache build-base libpcap-dev git
+RUN apk update && apk add --no-cache build-base libpcap-dev git tzdata
 
 WORKDIR /app
 
