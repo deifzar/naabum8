@@ -13,7 +13,7 @@ RUN go mod download
 # Copy source and build
 COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build \
-    -ldflags='-w -s -extldflags "-static"' \
+    -ldflags='-w -s' \
     -a -installsuffix cgo \
     -o naabum8 .
 
