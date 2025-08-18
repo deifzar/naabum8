@@ -33,7 +33,7 @@ RUN apk upgrade --no-cache && \
 WORKDIR /app
 
 # Copy pre-built binary with secure permissions
-# Note: Binary should be built with: CGO_ENABLED=0 go build -ldflags='-w -s' -o naabum8 .
+# Note: Binary should be built with: CGO_ENABLED=1 go build -ldflags='-w -s' -o naabum8 .
 COPY naabum8 /usr/local/bin/naabum8
 RUN chmod 755 /usr/local/bin/naabum8 && \
     # Set capabilities for non-root network operations (fallback - Docker runtime caps preferred)
@@ -49,7 +49,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Metadata
 LABEL maintainer="i@deifzar.me" \
     version="1.0" \
-    description="NaabuM8 - Hardened Network Scanner (Runtime)" \
+    description="NaabuM8 - Hardened Network Port Scanner (Runtime)" \
     security.scan="required-root-privileges"
 
 # Default command
