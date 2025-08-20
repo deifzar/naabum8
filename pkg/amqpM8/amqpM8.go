@@ -24,11 +24,20 @@ type AmqpM8Imp struct {
 
 func NewAmqpM8(location string, port int, username, password string) (AmqpM8Interface, error) {
 	connString := fmt.Sprintf("amqp://%s:%s@%s:%d/", username, password, location, port)
-	conn, err := amqp.Dial(connString)
-	log8.BaseLogger.Info().Msg("Connecting to RabbitMQ server ...")
-	if err != nil {
-		// return nil, fmt.Errorf("failed to connect to amqp server: %w", err)
-		return nil, err
+	var conn *amqp.Connection
+	for retries := 0; retries < 10; retries++ {
+		log8.BaseLogger.Info().Msg("Connecting to RabbitMQ server ...")
+		c, err := amqp.Dial(connString)
+		if err == nil {
+			conn = c
+			break // Connection successful
+		}
+		if retries == 9 {
+			log8.BaseLogger.Debug().Msg(err.Error())
+			return nil, err
+		}
+		log8.BaseLogger.Warn().Msgf("Failed to connect to RabbitMQ (attempt %d/10): %v", retries+1, err)
+		time.Sleep(5 * time.Second)
 	}
 	ch, err := conn.Channel()
 	log8.BaseLogger.Info().Msg("Creating channel in the RabbitMQ server ...")
