@@ -6,10 +6,24 @@ import (
 	"deifzar/naabum8/pkg/model8"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
+
+// ConsumerHealth tracks the health of individual consumers
+type ConsumerHealth struct {
+	ConsumerName string
+	QueueName    string
+	AutoACK      bool
+	IsActive     bool
+	LastSeen     time.Time
+	MessageCount uint64
+	ErrorCount   uint64
+	RestartCount uint64
+	CreatedAt    time.Time
+}
 
 type AmqpM8Imp struct {
 	conn      *amqp.Connection
@@ -20,6 +34,21 @@ type AmqpM8Imp struct {
 	consumers map[string][]string              // consumer name > queue name, autoack
 
 	handler map[string]func(msg amqp.Delivery) error
+
+	// Connection monitoring
+	connClosed    chan *amqp.Error
+	channelClosed chan *amqp.Error
+	isConnected   bool
+	mu            sync.RWMutex
+
+	// Consumer health monitoring
+	consumerHealth      map[string]*ConsumerHealth
+	healthCheckInterval time.Duration
+	healthCheckCtx      context.Context
+	healthCheckCancel   context.CancelFunc
+
+	// Consumer context management
+	consumerContexts map[string]context.CancelFunc
 }
 
 func NewAmqpM8(location string, port int, username, password string) (AmqpM8Interface, error) {
@@ -52,7 +81,34 @@ func NewAmqpM8(location string, port int, username, password string) (AmqpM8Inte
 	b := make(map[string]map[string][]string)
 	c := make(map[string][]string)
 
-	return &AmqpM8Imp{conn: conn, ch: ch, exchanges: e, queues: q, bindings: b, consumers: c, handler: h}, nil
+	// Create health check context
+	healthCtx, healthCancel := context.WithCancel(context.Background())
+
+	amqpInstance := &AmqpM8Imp{
+		conn:                conn,
+		ch:                  ch,
+		exchanges:           e,
+		queues:              q,
+		bindings:            b,
+		consumers:           c,
+		handler:             h,
+		connClosed:          make(chan *amqp.Error),
+		channelClosed:       make(chan *amqp.Error),
+		isConnected:         true,
+		consumerHealth:      make(map[string]*ConsumerHealth),
+		healthCheckInterval: 30 * time.Second,
+		healthCheckCtx:      healthCtx,
+		healthCheckCancel:   healthCancel,
+		consumerContexts:    make(map[string]context.CancelFunc),
+	}
+
+	// Set up connection monitoring
+	amqpInstance.setupConnectionMonitoring()
+
+	// Start consumer health monitoring
+	amqpInstance.startHealthMonitoring()
+
+	return amqpInstance, nil
 }
 
 func (a *AmqpM8Imp) AddHandler(queueName string, handler func(msg amqp.Delivery) error) {
@@ -265,6 +321,18 @@ func (a *AmqpM8Imp) Publish(exchangeName string, routingKey string, payload any,
 }
 
 func (a *AmqpM8Imp) Consume(consumerName, queueName string, autoACK bool) error {
+	// Use default context that can be cancelled during shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Store context cancel function for graceful shutdown
+	a.mu.Lock()
+	a.consumerContexts[consumerName] = cancel
+	a.mu.Unlock()
+
+	return a.ConsumeWithContext(ctx, consumerName, queueName, autoACK)
+}
+
+func (a *AmqpM8Imp) ConsumeWithContext(ctx context.Context, consumerName, queueName string, autoACK bool) error {
 
 	msgs, err := a.ch.Consume(
 		queueName,    // queue
@@ -276,34 +344,379 @@ func (a *AmqpM8Imp) Consume(consumerName, queueName string, autoACK bool) error 
 		nil,          // args
 	)
 	if err != nil {
+		a.updateConsumerHealth(consumerName, false, 0, 1)
 		return fmt.Errorf("consumer creation failed for queue `%s`: %w", queueName, err)
 	}
 
 	log8.BaseLogger.Info().Msgf("Success with consumer creation for queue `%s`", queueName)
 
-	var forever chan struct{}
+	// Register consumer health tracking
+	a.registerConsumer(consumerName, queueName, autoACK)
 
 	go func() {
-		for msg := range msgs {
-			// Process each msg
-			handler := a.handler[queueName]
-			handler(msg)
-			if !autoACK {
-				msg.Ack(false)
-				// msg.Nack(false,true)
+		defer func() {
+			if r := recover(); r != nil {
+				log8.BaseLogger.Error().Msgf("Consumer panic recovered for queue `%s`: %v", queueName, r)
+				a.updateConsumerHealth(consumerName, false, 0, 1)
+			}
+			a.markConsumerInactive(consumerName)
+			a.removeConsumerContext(consumerName)
+		}()
+
+		for {
+			select {
+			case <-ctx.Done():
+				log8.BaseLogger.Info().Msgf("Consumer `%s` shutting down gracefully due to context cancellation", consumerName)
+				// Cancel the consumer to stop receiving new messages
+				if err := a.CancelConsumer(consumerName); err != nil {
+					log8.BaseLogger.Error().Msgf("Error cancelling consumer `%s`: %v", consumerName, err)
+				}
+				return
+
+			case msg, ok := <-msgs:
+				if !ok {
+					log8.BaseLogger.Warn().Msgf("Consumer for queue `%s` stopped - message channel closed", queueName)
+					return
+				}
+
+				// Update last seen timestamp
+				a.updateConsumerLastSeen(consumerName)
+
+				// Process each msg with error handling
+				if handler := a.handler[queueName]; handler != nil {
+					if err := handler(msg); err != nil {
+						log8.BaseLogger.Error().Msgf("Handler error for queue `%s`: %v", queueName, err)
+						a.updateConsumerHealth(consumerName, true, 1, 1)
+					} else {
+						a.updateConsumerHealth(consumerName, true, 1, 0)
+					}
+				} else {
+					log8.BaseLogger.Warn().Msgf("No handler found for queue `%s`", queueName)
+					a.updateConsumerHealth(consumerName, true, 1, 1)
+				}
+
+				if !autoACK {
+					msg.Ack(false)
+				}
 			}
 		}
 	}()
-
-	<-forever
 
 	return nil
 }
 
 func (a *AmqpM8Imp) CloseConnection() {
-	a.conn.Close()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.isConnected = false
+
+	log8.BaseLogger.Info().Msg("Initiating graceful shutdown of RabbitMQ connection")
+
+	// Gracefully shutdown all consumers
+	a.shutdownAllConsumers()
+
+	// Stop health monitoring
+	if a.healthCheckCancel != nil {
+		a.healthCheckCancel()
+	}
+
+	if a.conn != nil {
+		a.conn.Close()
+	}
+
+	log8.BaseLogger.Info().Msg("RabbitMQ connection closed")
 }
 
 func (a *AmqpM8Imp) CloseChannel() {
-	a.ch.Close()
+	if a.ch != nil {
+		a.ch.Close()
+	}
+}
+
+// setupConnectionMonitoring sets up monitoring for connection and channel closures
+func (a *AmqpM8Imp) setupConnectionMonitoring() {
+	if a.conn != nil {
+		a.conn.NotifyClose(a.connClosed)
+	}
+	if a.ch != nil {
+		a.ch.NotifyClose(a.channelClosed)
+	}
+
+	go a.monitorConnection()
+}
+
+// monitorConnection monitors connection and channel state
+func (a *AmqpM8Imp) monitorConnection() {
+	for {
+		select {
+		case err := <-a.connClosed:
+			a.mu.Lock()
+			a.isConnected = false
+			a.mu.Unlock()
+
+			if err != nil {
+				log8.BaseLogger.Error().Msgf("RabbitMQ connection closed unexpectedly: %v", err)
+			} else {
+				log8.BaseLogger.Info().Msg("RabbitMQ connection closed gracefully")
+			}
+			return // Exit monitoring when connection closes
+
+		case err := <-a.channelClosed:
+			if err != nil {
+				log8.BaseLogger.Error().Msgf("RabbitMQ channel closed unexpectedly: %v", err)
+			} else {
+				log8.BaseLogger.Info().Msg("RabbitMQ channel closed gracefully")
+			}
+			// Channel can be recreated without closing connection monitoring
+		}
+	}
+}
+
+// IsConnected returns the current connection status
+func (a *AmqpM8Imp) IsConnected() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.isConnected && a.conn != nil && !a.conn.IsClosed()
+}
+
+// GetConnectionStatus returns detailed connection information
+func (a *AmqpM8Imp) GetConnectionStatus() map[string]interface{} {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	status := map[string]interface{}{
+		"is_connected":   a.isConnected,
+		"connection_nil": a.conn == nil,
+		"channel_nil":    a.ch == nil,
+	}
+
+	if a.conn != nil {
+		status["connection_closed"] = a.conn.IsClosed()
+	}
+
+	return status
+}
+
+// Consumer Health Monitoring Methods
+
+// registerConsumer adds a consumer to health tracking
+func (a *AmqpM8Imp) registerConsumer(consumerName, queueName string, autoACK bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	now := time.Now()
+	if health, exists := a.consumerHealth[consumerName]; exists {
+		health.RestartCount++
+		health.LastSeen = now
+		health.IsActive = true
+	} else {
+		a.consumerHealth[consumerName] = &ConsumerHealth{
+			ConsumerName: consumerName,
+			QueueName:    queueName,
+			AutoACK:      autoACK,
+			IsActive:     true,
+			LastSeen:     now,
+			CreatedAt:    now,
+		}
+	}
+
+	log8.BaseLogger.Info().Msgf("Registered consumer `%s` for health monitoring", consumerName)
+}
+
+// updateConsumerHealth updates consumer metrics
+func (a *AmqpM8Imp) updateConsumerHealth(consumerName string, isActive bool, messageIncrement, errorIncrement uint64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if health, exists := a.consumerHealth[consumerName]; exists {
+		health.IsActive = isActive
+		health.MessageCount += messageIncrement
+		health.ErrorCount += errorIncrement
+		if isActive {
+			health.LastSeen = time.Now()
+		}
+	}
+}
+
+// updateConsumerLastSeen updates the last seen timestamp
+func (a *AmqpM8Imp) updateConsumerLastSeen(consumerName string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if health, exists := a.consumerHealth[consumerName]; exists {
+		health.LastSeen = time.Now()
+		health.IsActive = true
+	}
+}
+
+// markConsumerInactive marks a consumer as inactive
+func (a *AmqpM8Imp) markConsumerInactive(consumerName string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if health, exists := a.consumerHealth[consumerName]; exists {
+		health.IsActive = false
+		log8.BaseLogger.Warn().Msgf("Consumer `%s` marked as inactive", consumerName)
+	}
+}
+
+// startHealthMonitoring starts the health check routine
+func (a *AmqpM8Imp) startHealthMonitoring() {
+	go func() {
+		ticker := time.NewTicker(a.healthCheckInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-a.healthCheckCtx.Done():
+				log8.BaseLogger.Info().Msg("Consumer health monitoring stopped")
+				return
+			case <-ticker.C:
+				a.performHealthChecks()
+			}
+		}
+	}()
+
+	log8.BaseLogger.Info().Msgf("Started consumer health monitoring (interval: %v)", a.healthCheckInterval)
+}
+
+// performHealthChecks checks the health of all consumers
+func (a *AmqpM8Imp) performHealthChecks() {
+	a.mu.RLock()
+	consumers := make(map[string]*ConsumerHealth)
+	for name, health := range a.consumerHealth {
+		consumers[name] = health
+	}
+	a.mu.RUnlock()
+
+	now := time.Now()
+	staleThreshold := 2 * a.healthCheckInterval
+
+	for consumerName, health := range consumers {
+		timeSinceLastSeen := now.Sub(health.LastSeen)
+
+		if health.IsActive && timeSinceLastSeen > staleThreshold {
+			log8.BaseLogger.Warn().Msgf(
+				"Consumer `%s` appears stale - last seen %v ago (threshold: %v)",
+				consumerName, timeSinceLastSeen, staleThreshold,
+			)
+			a.markConsumerInactive(consumerName)
+		}
+
+		// Log periodic health summary for active consumers
+		if health.IsActive {
+			log8.BaseLogger.Debug().Msgf(
+				"Consumer `%s` health: messages=%d, errors=%d, restarts=%d, last_seen=%v",
+				consumerName, health.MessageCount, health.ErrorCount, health.RestartCount,
+				timeSinceLastSeen.Round(time.Second),
+			)
+		}
+	}
+}
+
+// GetConsumerHealth returns health information for all consumers
+func (a *AmqpM8Imp) GetConsumerHealth() map[string]*ConsumerHealth {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	result := make(map[string]*ConsumerHealth)
+	for name, health := range a.consumerHealth {
+		// Create a copy to avoid race conditions
+		healthCopy := *health
+		result[name] = &healthCopy
+	}
+
+	return result
+}
+
+// GetConsumerHealthByName returns health information for a specific consumer
+func (a *AmqpM8Imp) GetConsumerHealthByName(consumerName string) (*ConsumerHealth, bool) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if health, exists := a.consumerHealth[consumerName]; exists {
+		healthCopy := *health
+		return &healthCopy, true
+	}
+
+	return nil, false
+}
+
+// SetHealthCheckInterval allows customizing the health check frequency
+func (a *AmqpM8Imp) SetHealthCheckInterval(interval time.Duration) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.healthCheckInterval = interval
+	log8.BaseLogger.Info().Msgf("Health check interval updated to %v", interval)
+}
+
+// Context Management Methods
+
+// removeConsumerContext removes a consumer's context cancel function
+func (a *AmqpM8Imp) removeConsumerContext(consumerName string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.consumerContexts, consumerName)
+}
+
+// shutdownAllConsumers gracefully shuts down all active consumers
+func (a *AmqpM8Imp) shutdownAllConsumers() {
+	log8.BaseLogger.Info().Msgf("Shutting down %d active consumers", len(a.consumerContexts))
+
+	// Cancel all consumer contexts
+	for consumerName, cancel := range a.consumerContexts {
+		log8.BaseLogger.Info().Msgf("Shutting down consumer: %s", consumerName)
+		cancel()
+	}
+
+	// Wait a short time for graceful shutdown
+	time.Sleep(1 * time.Second)
+
+	// Clear the contexts map
+	a.consumerContexts = make(map[string]context.CancelFunc)
+}
+
+// ShutdownConsumer gracefully shuts down a specific consumer
+func (a *AmqpM8Imp) ShutdownConsumer(consumerName string) error {
+	a.mu.Lock()
+	cancel, exists := a.consumerContexts[consumerName]
+	a.mu.Unlock()
+
+	if !exists {
+		return fmt.Errorf("consumer `%s` not found or already shutdown", consumerName)
+	}
+
+	log8.BaseLogger.Info().Msgf("Initiating graceful shutdown for consumer: %s", consumerName)
+	cancel()
+
+	return nil
+}
+
+// ShutdownAllConsumers provides external access to graceful consumer shutdown
+func (a *AmqpM8Imp) ShutdownAllConsumers() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.shutdownAllConsumers()
+}
+
+// GetActiveConsumers returns a list of currently active consumer names
+func (a *AmqpM8Imp) GetActiveConsumers() []string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	consumers := make([]string, 0, len(a.consumerContexts))
+	for consumerName := range a.consumerContexts {
+		consumers = append(consumers, consumerName)
+	}
+
+	return consumers
+}
+
+// IsConsumerActive checks if a specific consumer is currently active
+func (a *AmqpM8Imp) IsConsumerActive(consumerName string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	_, exists := a.consumerContexts[consumerName]
+	return exists
 }
