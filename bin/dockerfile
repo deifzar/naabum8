@@ -11,7 +11,8 @@ RUN apk upgrade --no-cache && \
     nmap \
     nmap-scripts \
     bind-tools \
-    tini && \
+    tini \
+    gettext && \
     # Remove potentially dangerous utilities
     rm -rf /bin/su \
     /bin/mount \
@@ -35,6 +36,10 @@ WORKDIR /app
 # Copy pre-built binary with secure permissions
 # Note: Binary should be built with: CGO_ENABLED=1 go build -ldflags='-w -s' -o naabum8 .
 COPY naabum8 /usr/local/bin/naabum8
+# Copy entrypoint script
+COPY --chown=appuser:appuser docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 RUN chmod 755 /usr/local/bin/naabum8 && \
     # Set capabilities for non-root network operations (fallback - Docker runtime caps preferred)
     setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip /usr/local/bin/naabum8
@@ -51,6 +56,9 @@ LABEL maintainer="i@deifzar.me" \
     version="1.0" \
     description="NaabuM8 - Hardened Network Port Scanner (Runtime)" \
     security.scan="required-root-privileges"
+
+# Use custom entrypoint for secret loading 
+ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Default command
 CMD ["naabum8", "launch"]

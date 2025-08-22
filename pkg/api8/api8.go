@@ -2,6 +2,7 @@ package api8
 
 import (
 	"database/sql"
+	"deifzar/naabum8/pkg/cleanup8"
 	"deifzar/naabum8/pkg/configparser"
 	"deifzar/naabum8/pkg/controller8"
 	"deifzar/naabum8/pkg/db8"
@@ -9,6 +10,9 @@ import (
 	"deifzar/naabum8/pkg/orchestrator8"
 
 	"github.com/spf13/viper"
+
+	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,6 +24,22 @@ type Api8 struct {
 }
 
 func (a *Api8) Init() error {
+	// Create log and tmp directories if they don't exist
+	if err := os.MkdirAll("log", 0755); err != nil {
+		log8.BaseLogger.Error().Err(err).Msg("Failed to create log directory")
+		return err
+	}
+	if err := os.MkdirAll("tmp", 0755); err != nil {
+		log8.BaseLogger.Error().Err(err).Msg("Failed to create tmp directory")
+		return err
+	}
+
+	// Clean up old files in tmp directory (older than 24 hours)
+	cleanup := cleanup8.NewCleanup8()
+	if err := cleanup.CleanupDirectory("tmp", 24*time.Hour); err != nil {
+		log8.BaseLogger.Error().Err(err).Msg("Failed to cleanup tmp directory")
+		// Don't return error here as cleanup failure shouldn't prevent startup
+	}
 	v, err := configparser.InitConfigParser()
 	if err != nil {
 		log8.BaseLogger.Debug().Stack().Msg(err.Error())

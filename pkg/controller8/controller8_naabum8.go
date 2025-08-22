@@ -3,6 +3,7 @@ package controller8
 import (
 	"context"
 	"database/sql"
+	"deifzar/naabum8/pkg/cleanup8"
 	"deifzar/naabum8/pkg/db8"
 	"deifzar/naabum8/pkg/log8"
 	"deifzar/naabum8/pkg/model8"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gin-gonic/gin"
@@ -37,6 +39,12 @@ func NewController8Naabum8(db *sql.DB, cnfg *viper.Viper) Controller8Naabum8Inte
 
 // Launch port scan across all the enabled systems
 func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
+	// Clean up old files in tmp directory (older than 24 hours)
+	cleanup := cleanup8.NewCleanup8()
+	if err := cleanup.CleanupDirectory("tmp", 24*time.Hour); err != nil {
+		log8.BaseLogger.Error().Err(err).Msg("Failed to cleanup tmp directory")
+		// Don't return error here as cleanup failure shouldn't prevent startup
+	}
 	// Check that RabbitMQ relevant Queue is available.
 	// If relevant queue does not exist, inform the user that there is one Naabum8 running at this moment and advise the user to wait for the latest results.
 	orchestrator8, err := orchestrator8.NewOrchestrator8()
@@ -107,6 +115,12 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 
 // Launch port scan across all the enabled systems under the main domain
 func (m *Controller8Naabum8) Naabum8Domain(c *gin.Context) {
+	// Clean up old files in tmp directory (older than 24 hours)
+	cleanup := cleanup8.NewCleanup8()
+	if err := cleanup.CleanupDirectory("tmp", 24*time.Hour); err != nil {
+		log8.BaseLogger.Error().Err(err).Msg("Failed to cleanup tmp directory")
+		// Don't return error here as cleanup failure shouldn't prevent startup
+	}
 	DB := m.Db
 	var uri model8.Domain8Uri
 	if err := c.ShouldBindUri(&uri); err != nil {
@@ -156,6 +170,12 @@ func (m *Controller8Naabum8) Naabum8Domain(c *gin.Context) {
 
 // Launch port scan across the hostnames submitted in the POST body
 func (m *Controller8Naabum8) Naabum8Hostnames(c *gin.Context) {
+	// Clean up old files in tmp directory (older than 24 hours)
+	cleanup := cleanup8.NewCleanup8()
+	if err := cleanup.CleanupDirectory("tmp", 24*time.Hour); err != nil {
+		log8.BaseLogger.Error().Err(err).Msg("Failed to cleanup tmp directory")
+		// Don't return error here as cleanup failure shouldn't prevent startup
+	}
 	DB := m.Db
 	var post model8.PostHostname8
 	if err := c.ShouldBindJSON(&post); err != nil {
