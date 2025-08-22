@@ -96,7 +96,7 @@ func NewAmqpM8(location string, port int, username, password string) (AmqpM8Inte
 		channelClosed:       make(chan *amqp.Error),
 		isConnected:         true,
 		consumerHealth:      make(map[string]*ConsumerHealth),
-		healthCheckInterval: 30 * time.Second,
+		healthCheckInterval: 30 * time.Minute,
 		healthCheckCtx:      healthCtx,
 		healthCheckCancel:   healthCancel,
 		consumerContexts:    make(map[string]context.CancelFunc),
