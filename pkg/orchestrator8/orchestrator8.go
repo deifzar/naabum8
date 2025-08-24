@@ -17,53 +17,72 @@ import (
 )
 
 type Orchestrator8 struct {
-	Amqp   amqpM8.AmqpM8Interface
+	// Amqp   amqpM8.PooledAmqpInterface
 	Config *viper.Viper
 }
 
+// NewOrchestrator8 creates a new orchestrator using connection pool
 func NewOrchestrator8() (Orchestrator8Interface, error) {
-
 	v, err := configparser.InitConfigParser()
 	if err != nil {
 		return &Orchestrator8{}, err
 	}
 
-	location := v.GetString("RabbitMQ.location")
-	port := v.GetInt("RabbitMQ.port")
-	username := v.GetString("RabbitMQ.username")
-	password := v.GetString("RabbitMQ.password")
-
-	am8, err := amqpM8.NewAmqpM8(location, port, username, password)
-	// defer am8.CloseConnection()
-	// defer am8.CloseChannel()
-	if err != nil {
-		log8.BaseLogger.Debug().Msg(err.Error())
-		return &Orchestrator8{}, err
+	// Try to initialize the default pool (will do nothing if already exists)
+	manager := amqpM8.GetGlobalPoolManager()
+	poolExists := false
+	for _, poolName := range manager.ListPools() {
+		if poolName == "default" {
+			poolExists = true
+			break
+		}
 	}
 
-	o := &Orchestrator8{Amqp: am8, Config: v}
+	if !poolExists {
+		err = amqpM8.InitializeConnectionPool()
+		if err != nil {
+			log8.BaseLogger.Debug().Msg(err.Error())
+			return &Orchestrator8{}, err
+		}
+	}
+
+	o := &Orchestrator8{Config: v}
 	return o, nil
 }
 
 func (o *Orchestrator8) InitOrchestrator() error {
 	exchanges := o.Config.GetStringMapString("ORCHESTRATORM8.Exchanges")
 
-	for exname, extype := range exchanges {
-		err := o.Amqp.DeclareExchange(exname, extype)
-		if err != nil {
-			log8.BaseLogger.Debug().Msg(err.Error())
-			return err
+	return amqpM8.WithPooledConnection(func(am8 amqpM8.PooledAmqpInterface) error {
+		for exname, extype := range exchanges {
+			err := am8.DeclareExchange(exname, extype)
+			if err != nil {
+				log8.BaseLogger.Debug().Msg(err.Error())
+				return err
+			}
 		}
+		return nil
+	})
+}
+
+func (o *Orchestrator8) ExistQueue(queueName string, queueArgs amqp.Table) bool {
+	var exists bool
+
+	err := amqpM8.WithPooledConnection(func(am8 amqpM8.PooledAmqpInterface) error {
+		exists = am8.ExistQueue(queueName, queueArgs)
+		return nil
+	})
+
+	if err != nil {
+		log8.BaseLogger.Debug().Msg(err.Error())
+		log8.BaseLogger.Error().Msgf("Error checking if queue `%s` exists", queueName)
+		return false
 	}
-	return nil
+
+	return exists
 }
 
-func (o *Orchestrator8) GetAmqp() amqpM8.AmqpM8Interface {
-	return o.Amqp
-}
-
-// This method defines the actions that customers carry when messages get published to the `cptm8` exchange.
-func (o *Orchestrator8) CreateHandleAPICallByService(service string) {
+func (o *Orchestrator8) CreateHandleAPICallByService(service string) error {
 	handle := func(msg amqp.Delivery) error {
 		services := o.Config.GetStringMapString("ORCHESTRATORM8.Services")
 		routingKey := msg.RoutingKey // cptm8.asmm8.get.scan. or cptm.asmm8.post.scan or cptm8.naabum8.get.scan/domain/1337 or cptm8.num8.post.endpoint/17/scan
@@ -93,8 +112,12 @@ func (o *Orchestrator8) CreateHandleAPICallByService(service string) {
 		log8.BaseLogger.Info().Msgf("RabbitMQ - handler for routing key `%s` - Success with HTTP request: %s.", routingKey, requestURL)
 		return nil
 	}
-	queue := o.Config.GetStringSlice("ORCHESTRATORM8." + service + ".Consumer")
-	o.Amqp.AddHandler(queue[0], handle)
+
+	return amqpM8.WithPooledConnection(func(am8 amqpM8.PooledAmqpInterface) error {
+		queue := o.Config.GetStringSlice("ORCHESTRATORM8." + service + ".Consumer")
+		am8.AddHandler(queue[0], handle)
+		return nil
+	})
 }
 
 func (o *Orchestrator8) ActivateQueueByService(service string) error {
@@ -106,22 +129,26 @@ func (o *Orchestrator8) ActivateQueueByService(service string) error {
 		log8.BaseLogger.Debug().Msg(err.Error())
 		return err
 	}
-	err = o.Amqp.DeclareQueue(queue[0], queue[1], prefetch_count, qargs)
-	if err != nil {
-		log8.BaseLogger.Debug().Msg(err.Error())
-		return err
-	}
-	err = o.Amqp.BindQueue(queue[0], queue[1], bindingkeys)
-	if err != nil {
-		log8.BaseLogger.Debug().Msg(err.Error())
-		return err
-	}
-	return nil
+
+	return amqpM8.WithPooledConnection(func(am8 amqpM8.PooledAmqpInterface) error {
+		err := am8.DeclareQueue(queue[0], queue[1], prefetch_count, qargs)
+		if err != nil {
+			log8.BaseLogger.Debug().Msg(err.Error())
+			return err
+		}
+		err = am8.BindQueue(queue[0], queue[1], bindingkeys)
+		if err != nil {
+			log8.BaseLogger.Debug().Msg(err.Error())
+			return err
+		}
+		return nil
+	})
 }
 
-func (o *Orchestrator8) ActivateConsumerByService(service string) {
+func (o *Orchestrator8) ActivateConsumerByService(service string) error {
 	log8.BaseLogger.Info().Msgf("Creating consumer for `%s` ...", service)
 	params := o.Config.GetStringSlice("ORCHESTRATORM8." + service + ".Consumer")
+
 	go func(p []string) {
 		qname := p[0]
 		cname := p[1]
@@ -130,7 +157,16 @@ func (o *Orchestrator8) ActivateConsumerByService(service string) {
 			log8.BaseLogger.Warn().Msgf("setting autoACK to `false` due to failure parsing config autoACK value from queue `%s`", qname)
 			autoACK = true
 		}
-		err = o.Amqp.Consume(cname, qname, autoACK)
+
+		// Get a dedicated connection for the consumer (consumers need long-lived connections)
+		am8, err := amqpM8.GetDefaultConnection()
+		if err != nil {
+			log8.BaseLogger.Debug().Msg(err.Error())
+			log8.BaseLogger.Error().Msgf("Failed to get connection for consumer `%s`", cname)
+			return
+		}
+
+		err = am8.Consume(cname, qname, autoACK)
 		if err != nil {
 			log8.BaseLogger.Debug().Msg(err.Error())
 			log8.BaseLogger.Error().Msgf("error creating consumer for queue `%s`", qname)
@@ -138,20 +174,29 @@ func (o *Orchestrator8) ActivateConsumerByService(service string) {
 			log8.BaseLogger.Info().Msgf("Created consumer for queue `%s`", qname)
 		}
 	}(params)
+	return nil
 }
 
 func (o *Orchestrator8) DeactivateConsumerByService(service string) error {
 	log8.BaseLogger.Info().Msgf("Deactivating consumer for `%s` ...", service)
 	params := o.Config.GetStringSlice("ORCHESTRATORM8." + service + ".Consumer")
-	err := o.Amqp.CancelConsumer(params[1])
-	return err
+
+	return amqpM8.WithPooledConnection(func(am8 amqpM8.PooledAmqpInterface) error {
+		return am8.CancelConsumer(params[1])
+	})
 }
 
-func (o *Orchestrator8) PublishToExchangeAndCloseChannelConnection(exchange string, routingkey string, payload any, source string) error {
-	defer o.Amqp.CloseConnection()
-	defer o.Amqp.CloseChannel()
-	if exchange != "" && routingkey != "" {
-		err := o.Amqp.Publish(exchange, routingkey, payload, source)
+// PublishToExchange uses the connection pool to publish a message
+func (o *Orchestrator8) PublishToExchange(exchange string, routingkey string, payload any, source string) error {
+	if exchange == "" || routingkey == "" {
+		err := errors.New("impossible to route message to RabbitMQ. Missing parameters such as exchange and routing key details")
+		log8.BaseLogger.Debug().Msg(err.Error())
+		log8.BaseLogger.Error().Msg("RabbitMQ publishing message has failed due to missing exchange and routing key parameters!")
+		return err
+	}
+
+	return amqpM8.WithPooledConnection(func(conn amqpM8.PooledAmqpInterface) error {
+		err := conn.Publish(exchange, routingkey, payload, source)
 		if err != nil {
 			log8.BaseLogger.Debug().Msg(err.Error())
 			log8.BaseLogger.Error().Msgf("RabbitMQ publishing message `%s` failed!", payload)
@@ -159,32 +204,41 @@ func (o *Orchestrator8) PublishToExchangeAndCloseChannelConnection(exchange stri
 		}
 		log8.BaseLogger.Info().Msgf("RabbitMQ publishing message `%s` success!", payload)
 		return nil
-	} else {
-		err := errors.New("impossible to route message to RabbitMQ. Missing paramaters such as exchange and routing key details")
-		log8.BaseLogger.Debug().Msg(err.Error())
-		log8.BaseLogger.Error().Msg("RabbitMQ publishing message has failed due to missing exchange and routing key parameters!")
-		return err
-	}
+	})
 }
 
 func (o *Orchestrator8) PublishToExchangeAndActivateConsumerByService(service string, exchange string, routingkey string, payload any, source string) error {
-	if service != "" && exchange != "" && routingkey != "" {
-		err := o.Amqp.Publish(exchange, routingkey, payload, source)
-		if err != nil {
-			log8.BaseLogger.Debug().Msg(err.Error())
-			log8.BaseLogger.Error().Msgf("RabbitMQ publishing message `%s` failed!", payload)
-			return err
-		}
-		log8.BaseLogger.Info().Msgf("RabbitMQ publishing message `%s` success!", payload)
-		// Activate queue and consumer but do not close the connection so the consumer remains active
-		o.ActivateQueueByService(service)
-		o.CreateHandleAPICallByService(service)
-		o.ActivateConsumerByService(service)
-		return nil
-	} else {
-		err := errors.New("impossible to route message to RabbitMQ. Missing paramaters such as exchange and routing key details")
+	if service == "" || exchange == "" || routingkey == "" {
+		err := errors.New("impossible to route message to RabbitMQ. Missing parameters such as service, exchange and routing key details")
 		log8.BaseLogger.Debug().Msg(err.Error())
-		log8.BaseLogger.Error().Msg("RabbitMQ publishing message has failed due to missing exchange and routing key parameters!")
+		log8.BaseLogger.Error().Msg("RabbitMQ publishing message has failed due to missing parameters!")
 		return err
 	}
+
+	// First publish the message using the cleaner pool pattern
+	err := amqpM8.WithPooledConnection(func(conn amqpM8.PooledAmqpInterface) error {
+		return conn.Publish(exchange, routingkey, payload, source)
+	})
+	if err != nil {
+		log8.BaseLogger.Debug().Msg(err.Error())
+		log8.BaseLogger.Error().Msgf("RabbitMQ publishing message `%s` failed!", payload)
+		return err
+	}
+	log8.BaseLogger.Info().Msgf("RabbitMQ publishing message `%s` success!", payload)
+
+	// Then activate queue and consumer (these get their own connections as needed)
+	err = o.ActivateQueueByService(service)
+	if err != nil {
+		return err
+	}
+	err = o.CreateHandleAPICallByService(service)
+	if err != nil {
+		return err
+	}
+	err = o.ActivateConsumerByService(service)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
