@@ -71,12 +71,12 @@ func (a *Api8) Init() error {
 	}
 	err = orchestrator8.ActivateQueueByService("naabum8")
 	if err != nil {
-		log8.BaseLogger.Error().Msg("Error bringing up the RabbitMQ queues for the `asmm8` service.")
+		log8.BaseLogger.Error().Msg("Error bringing up the RabbitMQ queues for the `naabum8` service.")
 		return err
 	}
 	err = orchestrator8.ActivateConsumerByService("naabum8")
 	if err != nil {
-		log8.BaseLogger.Error().Msg("Error activating consumer with dedicated connection for the `asmm8` service.")
+		log8.BaseLogger.Error().Msg("Error activating consumer with dedicated connection for the `naabum8` service.")
 		return err
 	}
 
