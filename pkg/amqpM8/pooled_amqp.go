@@ -46,6 +46,7 @@ type PooledAmqpInterface interface {
 	Publish(exchangeName string, routingKey string, payload any, source string) error
 	Consume(consumerName, queueName string, autoACK bool) error
 	ConsumeWithContext(ctx context.Context, consumerName, queueName string, autoACK bool) error
+	ConsumeWithReconnect(ctx context.Context, consumerName, queueName string, autoACK bool) error
 	ExistQueue(queueName string, queueArgs amqp.Table) bool
 	DeleteQueue(queueName string) error
 	CancelConsumer(consumerName string) error
@@ -73,12 +74,11 @@ type PooledAmqp struct {
 	pooledConn *PooledConnection
 	pool       *ConnectionPool
 
-	// Local state for this wrapper instance
-	queues    map[string]map[string]amqp.Queue
-	bindings  map[string]map[string][]string
-	exchanges map[string]string
+	// Shared state across all pooled connections
+	sharedState *SharedAmqpState
+
+	// Local state for this wrapper instance (consumer-specific)
 	consumers map[string][]string
-	handlers  map[string]func(msg amqp.Delivery) error
 
 	// Consumer health monitoring (lightweight for pooled connections)
 	consumerHealth      map[string]*ConsumerHealth
@@ -91,11 +91,8 @@ func NewPooledAmqp(pooledConn *PooledConnection, pool *ConnectionPool) *PooledAm
 	return &PooledAmqp{
 		pooledConn:          pooledConn,
 		pool:                pool,
-		queues:              make(map[string]map[string]amqp.Queue),
-		bindings:            make(map[string]map[string][]string),
-		exchanges:           make(map[string]string),
+		sharedState:         GetSharedState(), // Use global shared state
 		consumers:           make(map[string][]string),
-		handlers:            make(map[string]func(msg amqp.Delivery) error),
 		consumerHealth:      make(map[string]*ConsumerHealth),
 		healthCheckInterval: 30 * time.Minute,
 	}
@@ -103,9 +100,7 @@ func NewPooledAmqp(pooledConn *PooledConnection, pool *ConnectionPool) *PooledAm
 
 // AddHandler adds a message handler for a queue
 func (w *PooledAmqp) AddHandler(queueName string, handler func(msg amqp.Delivery) error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.handlers[queueName] = handler
+	w.sharedState.AddHandler(queueName, handler)
 }
 
 // GetChannel returns the underlying AMQP channel
@@ -115,91 +110,57 @@ func (w *PooledAmqp) GetChannel() *amqp.Channel {
 
 // GetQueues returns the queues map
 func (w *PooledAmqp) GetQueues() map[string]map[string]amqp.Queue {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.queues
+	return w.sharedState.GetQueues()
 }
 
 // GetBindings returns the bindings map
 func (w *PooledAmqp) GetBindings() map[string]map[string][]string {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.bindings
+	return w.sharedState.GetBindings()
 }
 
 // GetExchanges returns the exchanges map
 func (w *PooledAmqp) GetExchanges() map[string]string {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.exchanges
+	return w.sharedState.GetExchanges()
 }
 
 // GetExchangeTypeByExchangeName returns the exchange type for a given exchange name
 func (w *PooledAmqp) GetExchangeTypeByExchangeName(exchangeName string) string {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.exchanges[exchangeName]
+	return w.sharedState.GetExchangeTypeByExchangeName(exchangeName)
 }
 
 // GetQueueByExchangeNameAndQueueName returns a queue by exchange and queue name
 func (w *PooledAmqp) GetQueueByExchangeNameAndQueueName(exchangeName string, queuename string) amqp.Queue {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	if exchangeQueues, exists := w.queues[exchangeName]; exists {
-		return exchangeQueues[queuename]
-	}
-	return amqp.Queue{}
+	return w.sharedState.GetQueueByExchangeNameAndQueueName(exchangeName, queuename)
 }
 
 // GetBindingsByExchangeNameAndQueueName returns bindings for a queue
 func (w *PooledAmqp) GetBindingsByExchangeNameAndQueueName(exchangeName string, queuename string) []string {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	if exchangeBindings, exists := w.bindings[exchangeName]; exists {
-		return exchangeBindings[queuename]
-	}
-	return nil
+	return w.sharedState.GetBindingsByExchangeNameAndQueueName(exchangeName, queuename)
 }
 
 // GetConsumerByName returns consumer info by name
 func (w *PooledAmqp) GetConsumerByName(consumerName string) []string {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.consumers[consumerName]
+	return w.sharedState.GetConsumerByName(consumerName)
 }
 
 // SetExchange sets an exchange
 func (w *PooledAmqp) SetExchange(exchangeName string, exchangeType string) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.exchanges[exchangeName] = exchangeType
+	w.sharedState.SetExchange(exchangeName, exchangeType)
 }
 
 // SetQueueByExchangeName sets a queue for an exchange
 func (w *PooledAmqp) SetQueueByExchangeName(exchangeName string, queueName string, queue amqp.Queue) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.queues[exchangeName] == nil {
-		w.queues[exchangeName] = make(map[string]amqp.Queue)
-	}
-	w.queues[exchangeName][queueName] = queue
+	w.sharedState.SetQueueByExchangeName(exchangeName, queueName, queue)
 }
 
 // SetBindingQueueByExchangeName sets binding keys for a queue
 func (w *PooledAmqp) SetBindingQueueByExchangeName(exchangeName string, queueName string, bindingKeys []string) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.bindings[exchangeName] == nil {
-		w.bindings[exchangeName] = make(map[string][]string)
-	}
-	w.bindings[exchangeName][queueName] = bindingKeys
+	w.sharedState.SetBindingQueueByExchangeName(exchangeName, queueName, bindingKeys)
 }
 
 // SetConsumers sets the consumers map
 func (w *PooledAmqp) SetConsumers(c map[string][]string) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.consumers = c
+	w.sharedState.SetConsumers(c)
 }
 
 // DeclareExchange declares an exchange
@@ -225,15 +186,8 @@ func (w *PooledAmqp) DeclareExchange(exchangeName string, exchangeType string) e
 	log8.BaseLogger.Info().Msgf("Exchange successfully created with name `%s`", exchangeName)
 	w.SetExchange(exchangeName, exchangeType)
 
-	// Initialize maps for this exchange
-	w.mu.Lock()
-	if w.queues[exchangeName] == nil {
-		w.queues[exchangeName] = make(map[string]amqp.Queue)
-	}
-	if w.bindings[exchangeName] == nil {
-		w.bindings[exchangeName] = make(map[string][]string)
-	}
-	w.mu.Unlock()
+	// Initialize maps for this exchange in shared state
+	w.sharedState.InitializeExchange(exchangeName)
 
 	return nil
 }
@@ -437,7 +391,7 @@ func (w *PooledAmqp) ConsumeWithContext(ctx context.Context, consumerName, queue
 
 				w.updateConsumerLastSeen(consumerName)
 
-				if handler := w.handlers[queueName]; handler != nil {
+				if handler, exists := w.sharedState.GetHandler(queueName); exists {
 					if err := handler(msg); err != nil {
 						log8.BaseLogger.Error().Msgf("Handler error for queue `%s`: %v", queueName, err)
 						w.updateConsumerHealth(consumerName, true, 1, 1)
@@ -452,6 +406,77 @@ func (w *PooledAmqp) ConsumeWithContext(ctx context.Context, consumerName, queue
 				if !autoACK {
 					msg.Ack(false)
 				}
+			}
+		}
+	}()
+
+	return nil
+}
+
+// ConsumeWithReconnect starts consuming messages with automatic reconnection on connection failure
+func (w *PooledAmqp) ConsumeWithReconnect(ctx context.Context, consumerName, queueName string, autoACK bool) error {
+	log8.BaseLogger.Info().Msgf("Starting consumer `%s` for queue `%s` with auto-reconnect", consumerName, queueName)
+
+	go func() {
+		reconnectDelay := 5 * time.Second
+		maxReconnectDelay := 60 * time.Second
+		currentDelay := reconnectDelay
+
+		for {
+			select {
+			case <-ctx.Done():
+				log8.BaseLogger.Info().Msgf("Consumer `%s` shutting down gracefully due to context cancellation", consumerName)
+				return
+			default:
+				// Check if connection is healthy before attempting to consume
+				if !w.IsConnected() {
+					log8.BaseLogger.Warn().Msgf("Connection unhealthy for consumer `%s`, attempting to get new connection", consumerName)
+
+					// Try to get a new connection
+					newConn, err := GetDefaultConnection()
+					if err != nil {
+						log8.BaseLogger.Error().Msgf("Failed to get new connection for consumer `%s`: %v. Retrying in %v", consumerName, err, currentDelay)
+						time.Sleep(currentDelay)
+						// Exponential backoff with max limit
+						currentDelay = time.Duration(float64(currentDelay) * 1.5)
+						if currentDelay > maxReconnectDelay {
+							currentDelay = maxReconnectDelay
+						}
+						continue
+					}
+
+					// Update the pooled connection
+					if newPooledAmqp, ok := newConn.(*PooledAmqp); ok {
+						w.pooledConn = newPooledAmqp.pooledConn
+						log8.BaseLogger.Info().Msgf("Successfully obtained new connection for consumer `%s`", consumerName)
+					}
+				}
+
+				// Reset delay on successful connection
+				currentDelay = reconnectDelay
+
+				// Attempt to start consuming
+				err := w.ConsumeWithContext(ctx, consumerName, queueName, autoACK)
+				if err != nil {
+					log8.BaseLogger.Error().Msgf("Consumer `%s` for queue `%s` failed: %v. Reconnecting in %v", consumerName, queueName, err, currentDelay)
+
+					// Mark connection as unhealthy
+					w.pooledConn.mu.Lock()
+					w.pooledConn.isHealthy = false
+					w.pooledConn.mu.Unlock()
+
+					time.Sleep(currentDelay)
+					// Exponential backoff with max limit
+					currentDelay = time.Duration(float64(currentDelay) * 1.5)
+					if currentDelay > maxReconnectDelay {
+						currentDelay = maxReconnectDelay
+					}
+					continue
+				}
+
+				// If we reach here, ConsumeWithContext has exited (shouldn't happen normally)
+				log8.BaseLogger.Warn().Msgf("Consumer `%s` for queue `%s` exited unexpectedly, will attempt reconnection", consumerName, queueName)
+				time.Sleep(currentDelay)
 			}
 		}
 	}()
