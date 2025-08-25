@@ -1,7 +1,7 @@
 package orchestrator8
 
 import (
-	amqpM8 "deifzar/asmm8/pkg/amqpM8"
+	amqpM8 "deifzar/naabum8/pkg/amqpM8"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
