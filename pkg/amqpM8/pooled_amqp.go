@@ -422,7 +422,7 @@ func (w *PooledAmqp) ConsumeWithContext(ctx context.Context, consumerName, queue
 
 		for {
 			select {
-			case <-ctx.Done():
+			case <-ctx.Done(): // context.Background() never gets cancelled
 				log8.BaseLogger.Info().Msgf("Consumer `%s` shutting down gracefully", consumerName)
 				if err := w.CancelConsumer(consumerName); err != nil {
 					log8.BaseLogger.Error().Msgf("Error cancelling consumer `%s`: %v", consumerName, err)
