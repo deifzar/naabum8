@@ -56,7 +56,7 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 
 	queue_consumer := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Queue")
 	qargs_consumer := m.Config.GetStringMap("ORCHESTRATORM8.naabum8.Queue-arguments")
-	exchange := m.Config.GetStringSlice("ORCHESTRATORM8.katanam8.Queue")[0]
+	publishingdetails := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Publisher")
 	if m.Orch.ExistQueue(queue_consumer[1], qargs_consumer) {
 		DB := m.Db
 		// Set Runner options from config file.
@@ -65,7 +65,7 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 			// move on and call katanam8 scan
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan failed - Init runner options")
-			m.Orch.PublishToExchange(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
+			m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
 			notification8.PoolHelper.PublishSysErrorNotification("Naabum8Scan - Naabum8 Scan failed - Init runner options", "urgent", "naabum8")
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "failed", "msg": "Naabum8 Scan failed - Something wrong with the runner options"})
 			return
@@ -76,13 +76,13 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 			// move on and call katanam8 scan
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan - Failed to get the hostnames in scope.")
-			m.Orch.PublishToExchange(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
+			m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
 			notification8.PoolHelper.PublishSysErrorNotification("Naabum8Scan - Failed to get the hostnames in scope", "urgent", "naabum8")
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Naabum8 scan failed - Something wrong fetching the hostnames in scope."})
 			return
 		}
 		if len(hostname8ModelSlice) < 1 {
-			m.Orch.PublishToExchange(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
+			m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
 			notification8.PoolHelper.PublishSysWarningNotification("No targets in scope for a port scan. Make sure the client has enabled the scan on newly discovery assets.", "normal", "naabum8")
 			log8.BaseLogger.Info().Msg("Naabu8 scans success. No targets in scope.")
 			c.JSON(http.StatusAccepted, gin.H{"status": "success", "msg": "Naabum8 scans success. No targets in scope."})
@@ -95,7 +95,7 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 		err = m.Orch.ActivateQueueByService("naabum8")
 		if err != nil {
 			log8.BaseLogger.Fatal().Msg("HTTP 500 Response - Naabum8 scans failed - Error bringing up the RabbitMQ queues for the Naabum8 service.")
-			m.Orch.PublishToExchange(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
+			m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
 			notification8.PoolHelper.PublishSysErrorNotification("Naabum8Scan - Error bringing up the RabbitMQ queues for the Naabum8 service", "urgent", "naabum8")
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Num8 Scans failed. Error bringing up the RabbitMQ queues for the Naabum8 service."})
 			return
@@ -107,7 +107,7 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 	} else {
 		// move on and call katanam8 scan
 		log8.BaseLogger.Info().Msg("Naabum8 Scan API call forbidden")
-		m.Orch.PublishToExchange(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
+		m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
 		notification8.PoolHelper.PublishSysErrorNotification("Naabum8Scan - Launching Naabum8 Scan is not possible at this moment due to non-existent RabbitMQ queues.", "urgent", "naabum8")
 		c.JSON(http.StatusForbidden, gin.H{"status": "forbidden", "msg": "Num8 Scans failed - Launching Naabum8 Scan is not possible at this moment due to non-existent RabbitMQ queues."})
 		return
@@ -394,9 +394,8 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 	// publish RabbitMQ message for katanam8 only if the Naabum8 scan is full
 	if fullscan {
 		// call katanam8 scan
-		exchange := m.Config.GetStringSlice("ORCHESTRATORM8.katanam8.Queue")[0]
-		m.Orch.PublishToExchange(exchange, "cptm8.katanam8.get.scan", nil, "naabum8")
-	}
+		publishingdetails := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Publisher")
+		m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
 	// discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), m.OutputResult.JSONEncodeToString())
 }
 

@@ -9,11 +9,11 @@ import (
 // SharedAmqpState manages shared state across all pooled AMQP connections
 type SharedAmqpState struct {
 	mu        sync.RWMutex
-	queues    map[string]map[string]amqp.Queue
-	bindings  map[string]map[string][]string
-	exchanges map[string]string
-	consumers map[string][]string
-	handlers  map[string]func(msg amqp.Delivery) error
+	queues    map[string]map[string]amqp.Queue         // [exchange_name][queue_name] Queue Object
+	bindings  map[string]map[string][]string           // [exchange_name][queue_name][binding_keys ...]
+	exchanges map[string]string                        // [exchange_name]exchange_type
+	consumers map[string][]string                      // [queue_name][consumer_name ...]
+	handlers  map[string]func(msg amqp.Delivery) error // [queue_name] func
 }
 
 // Global shared state instance
@@ -147,6 +147,84 @@ func (s *SharedAmqpState) SetConsumers(c map[string][]string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.consumers = c
+}
+
+func (s *SharedAmqpState) AddConsumerToQueue(queueName, consumerName string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.consumers[queueName] == nil {
+		s.consumers[queueName] = make([]string, 0)
+	}
+	s.consumers[queueName] = append(s.consumers[queueName], consumerName)
+}
+
+func (s *SharedAmqpState) GetConsumersForQueue(queueName string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if consumers, exists := s.consumers[queueName]; exists {
+		// Return a copy to prevent external modification
+		result := make([]string, len(consumers))
+		copy(result, consumers)
+		return result
+	}
+	return nil
+}
+
+func (s *SharedAmqpState) DeleteQueueByName(qname string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	bindingsAux := make(map[string]map[string][]string)
+	queuesAux := make(map[string]map[string]amqp.Queue)
+	consumersAux := make(map[string][]string)
+	handlersAux := make(map[string]func(msg amqp.Delivery) error)
+
+	for exchange, queues := range s.bindings {
+		bindingsAux[exchange] = make(map[string][]string)
+		for q, bindings := range queues {
+			if q != qname {
+				bindingsAux[exchange][q] = bindings
+			}
+		}
+	}
+
+	for exchange, queues := range s.queues {
+		queuesAux[exchange] = make(map[string]amqp.Queue)
+		for q, qObject := range queues {
+			if q != qname {
+				queuesAux[exchange][q] = qObject
+			}
+		}
+	}
+
+	for q, c := range s.consumers {
+		if q != qname {
+			consumersAux[q] = c
+		}
+	}
+
+	for q, h := range s.handlers {
+		if q != qname {
+			handlersAux[q] = h
+		}
+	}
+
+	s.bindings = bindingsAux
+	s.queues = queuesAux
+	s.consumers = consumersAux
+	s.handlers = handlersAux
+}
+
+func (s *SharedAmqpState) DeleteConsumerByName(cname string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for q, consumers := range s.consumers {
+		for i, c := range consumers {
+			if c == cname {
+				s.consumers[q] = append(s.consumers[q][:i], s.consumers[q][i+1:]...)
+			}
+		}
+	}
 }
 
 // Initialize shared state maps for a new exchange

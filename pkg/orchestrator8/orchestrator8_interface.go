@@ -17,7 +17,6 @@ type Orchestrator8Interface interface {
 	activateConsumerByServiceWithReconnect(service string, conn amqpM8.PooledAmqpInterface) error
 	ActivateQueueByService(service string) error
 	ActivateConsumerByService(service string) error
-	DeactivateConsumerByService(service string) error
 	PublishToExchange(exchange string, routingkey string, payload any, source string) error
 	ExistQueue(queueName string, queueArgs amqp.Table) bool
 	// BuildHandlers()

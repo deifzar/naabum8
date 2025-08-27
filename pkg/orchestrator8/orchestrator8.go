@@ -127,9 +127,9 @@ func (o *Orchestrator8) createHandleAPICallByServiceWithConnection(service strin
 		return nil, err
 	}
 
-	queue := o.Config.GetStringSlice("ORCHESTRATORM8." + service + ".Consumer")
-	am8.AddHandler(queue[0], handle)
-	log8.BaseLogger.Info().Msgf("Handler registered for queue `%s` on dedicated connection", queue[0])
+	queue := o.Config.GetStringSlice("ORCHESTRATORM8." + service + ".Consumer")[0]
+	am8.AddHandler(queue, handle)
+	log8.BaseLogger.Info().Msgf("Handler registered for queue `%s` on dedicated connection", queue)
 
 	return am8, nil
 }
@@ -176,7 +176,7 @@ func (o *Orchestrator8) activateConsumerByServiceWithReconnect(service string, c
 	ctx := context.Background()
 
 	qname := params[0]
-	cname := params[1]
+	cname := params[0] // ConsumeWithReconnect generate unique consumer name using this value as a prefix
 	autoACK, err := strconv.ParseBool(params[2])
 	if err != nil {
 		log8.BaseLogger.Warn().Msgf("setting autoACK to `false` due to failure parsing config autoACK value from queue `%s`", qname)
@@ -191,15 +191,6 @@ func (o *Orchestrator8) activateConsumerByServiceWithReconnect(service string, c
 
 	log8.BaseLogger.Info().Msgf("Created consumer with auto-reconnect for queue `%s` using existing connection", qname)
 	return nil
-}
-
-func (o *Orchestrator8) DeactivateConsumerByService(service string) error {
-	log8.BaseLogger.Info().Msgf("Deactivating consumer for `%s` ...", service)
-	params := o.Config.GetStringSlice("ORCHESTRATORM8." + service + ".Consumer")
-
-	return amqpM8.WithPooledConnection(func(am8 amqpM8.PooledAmqpInterface) error {
-		return am8.CancelConsumer(params[1])
-	})
 }
 
 // PublishToExchange uses the connection pool to publish a message
