@@ -396,7 +396,8 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 		// call katanam8 scan
 		publishingdetails := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Publisher")
 		m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
-	// discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), m.OutputResult.JSONEncodeToString())
+		// discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), m.OutputResult.JSONEncodeToString())
+	}
 }
 
 func (m *Controller8Naabum8) updateService8AndHostnameinfo8ForTargetDB(hostname8 model8.Hostname8, service8List []model8.Service8, hostnameinfo8List []model8.Hostnameinfo8, softslice map[string]map[int]string) error {
