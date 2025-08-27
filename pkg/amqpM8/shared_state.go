@@ -27,6 +27,7 @@ func GetSharedState() *SharedAmqpState {
 			queues:    make(map[string]map[string]amqp.Queue),
 			bindings:  make(map[string]map[string][]string),
 			exchanges: make(map[string]string),
+			consumers: make(map[string][]string),
 			handlers:  make(map[string]func(msg amqp.Delivery) error),
 		}
 	})
