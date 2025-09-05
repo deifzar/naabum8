@@ -44,9 +44,6 @@ RUN chmod 755 /usr/local/bin/naabum8 && \
     # Set capabilities for non-root network operations (fallback - Docker runtime caps preferred)
     setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip /usr/local/bin/naabum8
 
-# Use tini as init system for proper signal handling
-ENTRYPOINT ["/sbin/tini", "--"]
-
 # Health check with proper command
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD /usr/local/bin/naabum8 help || exit 1
@@ -57,8 +54,8 @@ LABEL maintainer="i@deifzar.me" \
     description="NaabuM8 - Hardened Network Port Scanner (Runtime)" \
     security.scan="required-root-privileges"
 
-# Use custom entrypoint for secret loading 
-ENTRYPOINT ["docker-entrypoint.sh"]
+# Use tini as init system with custom entrypoint for proper signal handling and secret loading
+ENTRYPOINT ["/sbin/tini", "--", "docker-entrypoint.sh"]
 
 # Default command
 CMD ["naabum8", "launch"]

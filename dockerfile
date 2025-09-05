@@ -53,15 +53,15 @@ RUN chmod 755 /usr/local/bin/naabum8
 
 WORKDIR /app
 
-# Use tini as init system for proper signal handling
-ENTRYPOINT ["/sbin/tini", "--"]
+# Use tini as init system for proper signal handling and set default command
+ENTRYPOINT ["/sbin/tini", "--", "naabum8"]
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD naabum8 help || exit 1
 
-# Default command
-CMD ["naabum8", "help"]
+# Default command arguments
+CMD ["help"]
 
 # Metadata
 LABEL maintainer="i@deifzar.me" \
