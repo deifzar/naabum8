@@ -17,8 +17,10 @@ type Orchestrator8Interface interface {
 	activateConsumerByServiceWithReconnect(service string, conn amqpM8.PooledAmqpInterface) error
 	ActivateQueueByService(service string) error
 	ActivateConsumerByService(service string) error
+	// PublishToExchange uses the connection pool to publish a message
 	PublishToExchange(exchange string, routingkey string, payload any, source string) error
 	ExistQueue(queueName string, queueArgs amqp.Table) bool
+	ExistConsumersForQueue(queueName string) bool
 	// BuildHandlers()
 	// BuildConsumers()
 }

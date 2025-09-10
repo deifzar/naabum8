@@ -93,6 +93,10 @@ func (a *Api8) Routes() {
 	r.POST("/scan", contrNaabum8.Naabum8Hostnames)
 	r.GET("/scan/domain/:id", contrNaabum8.Naabum8Domain)
 
+	// Health live probes
+	r.GET("/health", contrNaabum8.HealthCheck)
+	r.GET("/ready", contrNaabum8.ReadinessCheck)
+
 	a.Router = r
 }
 

@@ -10,6 +10,8 @@ type Controller8Naabum8Interface interface {
 	Naabum8Scan(*gin.Context)
 	Naabum8Domain(*gin.Context)
 	Naabum8Hostnames(*gin.Context)
+	HealthCheck(c *gin.Context)
+	ReadinessCheck(c *gin.Context)
 	initRunnerOptions() error
 	runNaabu8(fullscan bool, firstrun bool)
 	workWithNaabuAndNmapResults([]model8.Host)

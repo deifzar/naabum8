@@ -83,6 +83,24 @@ func (o *Orchestrator8) ExistQueue(queueName string, queueArgs amqp.Table) bool 
 	return exists
 }
 
+func (o *Orchestrator8) ExistConsumersForQueue(queueName string) bool {
+	var exists bool
+
+	err := amqpM8.WithPooledConnection(func(am8 amqpM8.PooledAmqpInterface) error {
+		c := am8.GetConsumersForQueue(queueName)
+		exists = len(c) > 0
+		return nil
+	})
+
+	if err != nil {
+		log8.BaseLogger.Debug().Msg(err.Error())
+		log8.BaseLogger.Error().Msgf("Error checking if consumers exist for queue `%s`", queueName)
+		return false
+	}
+
+	return exists
+}
+
 func (o *Orchestrator8) CreateHandleAPICallByService(service string) error {
 	_, err := o.createHandleAPICallByServiceWithConnection(service)
 	return err
