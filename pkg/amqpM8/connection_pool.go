@@ -76,9 +76,9 @@ func DefaultConnectionPoolConfig() ConnectionPoolConfig {
 	return ConnectionPoolConfig{
 		MaxConnections:    10,
 		MinConnections:    2,
-		MaxIdleTime:       15 * time.Minute,
-		MaxLifetime:       1 * time.Hour,
-		HealthCheckPeriod: 5 * time.Minute,
+		MaxIdleTime:       1 * time.Hour,
+		MaxLifetime:       2 * time.Hour,
+		HealthCheckPeriod: 30 * time.Minute,
 		ConnectionTimeout: 30 * time.Second,
 		RetryAttempts:     3,
 		RetryDelay:        2 * time.Second,
@@ -172,7 +172,7 @@ func (p *ConnectionPool) createConnection() (*PooledConnection, error) {
 		isHealthy: true,
 	}
 
-	log8.BaseLogger.Debug().Msg("Created new pooled connection")
+	log8.BaseLogger.Info().Msg("Created new pooled connection")
 	return pooledConn, nil
 }
 
@@ -194,7 +194,7 @@ func (p *ConnectionPool) Get() (PooledAmqpInterface, error) {
 
 			// Create a wrapper that implements PooledAmqpInterface
 			wrapper := NewPooledAmqp(pooledConn, p)
-			log8.BaseLogger.Debug().Msg("Retrieved existing connection from pool")
+			// log8.BaseLogger.Debug().Msg("Retrieved existing connection from pool")
 			return wrapper, nil
 		}
 		pooledConn.mu.Unlock()
@@ -235,7 +235,7 @@ func (p *ConnectionPool) Return(conn PooledAmqpInterface) {
 		p.totalReturned++
 		p.mu.Unlock()
 
-		log8.BaseLogger.Debug().Msg("Returned connection to pool")
+		// log8.BaseLogger.Debug().Msg("Returned connection to pool")
 	}
 }
 
@@ -289,7 +289,7 @@ func (p *ConnectionPool) HealthCheck() {
 
 		if !pooledConn.inUse && (!p.isConnectionValid(pooledConn) || !pooledConn.isHealthy) {
 			toRemove = append(toRemove, pooledConn)
-			log8.BaseLogger.Debug().Msgf("Marking connection %d for removal (invalid or unhealthy)", i)
+			log8.BaseLogger.Info().Msgf("Marking connection %d for removal (invalid or unhealthy)", i)
 		} else if pooledConn.isHealthy {
 			healthyCount++
 		}
@@ -319,7 +319,7 @@ func (p *ConnectionPool) HealthCheck() {
 		}
 	}
 
-	log8.BaseLogger.Debug().Msgf("Health check completed: %d healthy, %d total connections",
+	log8.BaseLogger.Info().Msgf("Health check completed: %d healthy, %d total connections",
 		healthyCount, len(p.pool))
 }
 

@@ -410,7 +410,7 @@ func (w *PooledAmqp) ConsumeWithContext(ctx context.Context, consumerName, queue
 				if !ok {
 					log8.BaseLogger.Warn().Msgf("Consumer for queue `%s` stopped - channel closed", queueName)
 					// Publish message to other microservice so it does not stall the flow
-					w.publishMessage("cptm8", "cptm8.katanam8.get.scan", nil, "naabum8")
+					w.publishMessage("cptm8", "cptm8.naabum8.get.scan", nil, "asmm8")
 					// Send error to indicate connection failure
 					done <- fmt.Errorf("consumer for queue `%s` stopped - connection lost", queueName)
 					return
@@ -598,7 +598,7 @@ func (w *PooledAmqp) CloseConnection() {
 // The function simply calls Return from connection_pool, which sets the property 'inUse' to 'false'
 func (w *PooledAmqp) ReturnToPool() {
 	w.pool.Return(w)
-	log8.BaseLogger.Debug().Msg("Explicitly returned pooled connection to pool")
+	// log8.BaseLogger.Debug().Msg("Explicitly returned pooled connection to pool")
 }
 
 // CloseChannel does NOTHING for pooled connections (channel is managed by pool).
