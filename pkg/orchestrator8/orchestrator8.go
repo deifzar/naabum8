@@ -83,12 +83,12 @@ func (o *Orchestrator8) ExistQueue(queueName string, queueArgs amqp.Table) bool 
 	return exists
 }
 
-func (o *Orchestrator8) ExistConsumersForQueue(queueName string) bool {
+func (o *Orchestrator8) ExistConsumersForQueue(queueName string, queueArgs amqp.Table) bool {
 	var exists bool
 
 	err := amqpM8.WithPooledConnection(func(am8 amqpM8.PooledAmqpInterface) error {
-		c := am8.GetConsumersForQueue(queueName)
-		exists = len(c) > 0
+		c := am8.GetNumberOfActiveConsumersByQueue(queueName, queueArgs)
+		exists = c > 0
 		return nil
 	})
 

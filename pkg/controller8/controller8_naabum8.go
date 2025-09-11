@@ -239,7 +239,7 @@ func (m *Controller8Naabum8) ReadinessCheck(c *gin.Context) {
 	queue_consumer := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Queue")
 	qargs_consumer := m.Config.GetStringMap("ORCHESTRATORM8.naabum8.Queue-arguments")
 
-	if !m.Orch.ExistQueue(queue_consumer[1], qargs_consumer) || !m.Orch.ExistConsumersForQueue(queue_consumer[1]) {
+	if !m.Orch.ExistQueue(queue_consumer[1], qargs_consumer) || !m.Orch.ExistConsumersForQueue(queue_consumer[1], qargs_consumer) {
 		rbHealthy = false
 	}
 
