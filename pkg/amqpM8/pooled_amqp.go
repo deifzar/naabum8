@@ -211,7 +211,7 @@ func (w *PooledAmqp) DeclareQueue(exchangeName string, queueName string, prefetc
 
 	q, err := w.pooledConn.channel.QueueDeclare(
 		queueName, // name
-		false,     // durable
+		true,      // durable
 		false,     // delete when unused
 		false,     // exclusive
 		false,     // no-wait
@@ -267,7 +267,7 @@ func (w *PooledAmqp) GetNumberOfActiveConsumersByQueue(queueName string, queueAr
 
 	queue, err := w.pooledConn.channel.QueueDeclarePassive(
 		queueName, // name
-		false,     // durable
+		true,      // durable
 		false,     // delete when unused
 		false,     // exclusive
 		false,     // no-wait
@@ -288,7 +288,7 @@ func (w *PooledAmqp) ExistQueue(queueName string, queueArgs amqp.Table) bool {
 
 	_, err := w.pooledConn.channel.QueueDeclarePassive(
 		queueName, // name
-		false,     // durable
+		true,      // durable
 		false,     // delete when unused
 		false,     // exclusive
 		false,     // no-wait
