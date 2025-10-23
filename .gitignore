@@ -2,7 +2,7 @@
 /naabum8
 
 # configuration files
-/configuration.yaml
+configs/*
 
 # other session files
 resume.cfg

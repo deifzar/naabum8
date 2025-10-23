@@ -162,7 +162,7 @@ import (
 func InitConfigParser() (*viper.Viper, error) {
 	var err error
 	v := viper.New()
-	v.AddConfigPath(".")
+	v.AddConfigPath("./configs")
 	v.SetConfigType("yaml")
 	v.SetConfigName("configuration")
 	v.OnConfigChange(func(e fsnotify.Event) {

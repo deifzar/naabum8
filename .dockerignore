@@ -1,5 +1,6 @@
 bin
 */docs/*
+*/configs/*
 */app/*
 */log/*.log
 */log/*.log.gz
