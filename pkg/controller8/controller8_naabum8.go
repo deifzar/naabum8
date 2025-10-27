@@ -17,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
 	"github.com/gin-gonic/gin"
 	"github.com/projectdiscovery/naabu/v2/pkg/result"
 	"github.com/projectdiscovery/naabu/v2/pkg/runner"
@@ -366,33 +365,14 @@ func (m *Controller8Naabum8) initRunnerOptions() error {
 
 func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 
-	naabuM88Discord := model8.NewModel8Discord8(
-		m.Config.GetString("Discord.webhookURL"),
-		m.Config.GetString("Discord.webhookID"),
-		m.Config.GetString("Discord.webhookName"),
-		m.Config.GetString("Discord.webhookToken"),
-		m.Config.GetString("Discord.botToken"))
-	err := naabuM88Discord.InitialiseChannelID()
+	err := m.runnerOptions.ValidateOptions()
 	if err != nil {
 		log8.BaseLogger.Debug().Stack().Msg(err.Error())
 		return
 	}
-	discordBot, err := discordgo.New("Bot " + naabuM88Discord.GetBotToken())
-	if err != nil {
-		log8.BaseLogger.Debug().Stack().Msg(err.Error())
-		return
-	}
-	err = m.runnerOptions.ValidateOptions()
-	if err != nil {
-		discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), err.Error())
-		log8.BaseLogger.Debug().Stack().Msg(err.Error())
-		return
-	}
-	discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), ":desktop: Port scans are about to kick off :dog2:")
-	discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), ":regional_indicator_g: :regional_indicator_o: !")
+	log8.BaseLogger.Info().Stack().Msg("port scans are about to kick off")
 	naabuRunner, err := runner.NewRunner(m.runnerOptions)
 	if err != nil {
-		discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), "Error when initialising the runner: "+err.Error())
 		log8.BaseLogger.Debug().Stack().Msg(err.Error())
 		return
 	}
@@ -400,14 +380,12 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 	err = naabuRunner.RunEnumeration(context.TODO())
 	log8.BaseLogger.Info().Msg("Naabum8 scans running.")
 	if err != nil {
-		discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), "Error after attempt of launch: "+err.Error())
 		log8.BaseLogger.Debug().Stack().Msg(err.Error())
 		return
 	}
-	discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), ":checkered_flag: Port scan has finished. :grin: :sweat_drops:")
+	log8.BaseLogger.Info().Msg("Naabum8 scans have completed")
 	if firstrun && m.OutputResult.IsEmpty() {
-		log8.BaseLogger.Info().Msg("Port scan has finished with empty results")
-		discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), ":checkered_flag: Port scan has finished with empty results. :grin: :sweat_drops:")
+		log8.BaseLogger.Info().Msg("Naabum8 scans have completed with empty results")
 		// Is the port scan blocked by an ISP? Run port scan against only port 80 and 443.
 		m.runnerOptions.Ports = "80,443"
 		m.runNaabu8(fullscan, false)
@@ -418,33 +396,32 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 		nmap, err := os.ReadFile("./tmp/nmap-output.xml")
 		if err != nil {
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
-			log8.BaseLogger.Warn().Msgf("Error reading the nmap output")
+			log8.BaseLogger.Warn().Msgf("error reading the nmap output: tmp/nmap-output.xml")
 		} else {
 			nmapObj, err := utils.NmapParse(nmap)
 			if err != nil {
 				log8.BaseLogger.Debug().Stack().Msg(err.Error())
-				log8.BaseLogger.Warn().Msgf("Error parsing the nmap output")
+				log8.BaseLogger.Warn().Msgf("error parsing the nmap output: tmp/nmap-output.xml")
 			} else {
 				nmapHosts = nmapObj.Hosts
 			}
 		}
 		m.workWithNaabuAndNmapResults(nmapHosts)
+		log8.BaseLogger.Info().Msg("finished parsing naabu and nmap results")
 		// Enumerating HTTP endpoints with HTTPx
 		contrHttpx8 := NewController8Httpx8(m.Db, m.runnerOptions.Host, portsHTTPxFormat)
 		contrHttpx8.InitRunnerOptions()
 		err = contrHttpx8.Run()
 		if err != nil {
-			discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), "Error ocurred launching HTTPx: "+err.Error())
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			// Send a notification informing that something is wrong with the enumeration of the HTTP endpoints
 		}
 		err = contrHttpx8.UpdateDB()
 		if err != nil {
-			discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), "Error after uploading HTTP endpoints: "+err.Error())
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			// Send a notification informing that something is wrong with the HTTP endpoints and the database
 		}
-		discordBot.ChannelMessageSend(naabuM88Discord.GetChannelID(), "HTTP endpoints successfully updated.")
+		log8.BaseLogger.Info().Msg("HTTP endpoints successfully updated in DB")
 	}
 	// publish RabbitMQ message for katanam8 only if the Naabum8 scan is full
 	if fullscan {

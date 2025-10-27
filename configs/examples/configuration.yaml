@@ -101,12 +101,6 @@ NAABUM8: # Naabu scan settings
   ReversePTR:
   DisableUpdateCheck:
   MetricsPort:
-Discord: # Discord webhook and bot details
-  webhookURL: "https://discord.com/api/webhooks/...."
-  webhookID: "111111111111111111"
-  webhookName: "name"
-  webhookToken: "token"
-  botToken: "bottoken"
 Database: # PostgreSQL connection details
   location: "hostname"
   port: 5432
