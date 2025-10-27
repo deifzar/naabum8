@@ -25,15 +25,15 @@ type Api8 struct {
 
 func (a *Api8) Init() error {
 	// Create configs, log and tmp directories if they don't exist
-	if err := os.MkdirAll("configs", 0755); err != nil {
+	if err := os.MkdirAll("configs", 0750); err != nil {
 		log8.BaseLogger.Error().Err(err).Msg("Failed to create configs directory")
 		return err
 	}
-	if err := os.MkdirAll("log", 0755); err != nil {
+	if err := os.MkdirAll("log", 0750); err != nil {
 		log8.BaseLogger.Error().Err(err).Msg("Failed to create log directory")
 		return err
 	}
-	if err := os.MkdirAll("tmp", 0755); err != nil {
+	if err := os.MkdirAll("tmp", 0750); err != nil {
 		log8.BaseLogger.Error().Err(err).Msg("Failed to create tmp directory")
 		return err
 	}
