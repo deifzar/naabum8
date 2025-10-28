@@ -14,9 +14,11 @@ type Controller8Naabum8Interface interface {
 	ReadinessCheck(c *gin.Context)
 	initRunnerOptions() error
 	runNaabu8(fullscan bool, firstrun bool)
-	workWithNaabuAndNmapResults([]model8.Host)
-	setService8AndHostnameinfo8ForTarget(hostname string, nmapHosts []model8.Host) ([]model8.Service8, []model8.Hostnameinfo8, map[string]map[int]string, error)
-	updateService8AndHostnameinfo8ForTargetDB(hostname8 model8.Hostname8, service8List []model8.Service8, hostnameinfo8List []model8.Hostnameinfo8, softslice map[string]map[int]string) error
+	updateServicesInfoFromNmapResults(nmapOutput []model8.Host) error
+	returnService8AndHostnameinfo8FromNmapOutputByHostname(hostname string, nmapOutput []model8.Host) ([]model8.Service8, []model8.Hostnameinfo8, map[string]map[int]string, error)
+	updateService8AndHostnameinfo8ByHostnameObject(hostname8 model8.Hostname8, service8List []model8.Service8, hostnameinfo8List []model8.Hostnameinfo8, softslice map[string]map[int]string) error
+	handleErrorOnFullscan(fullscan bool, message string, urgency string)
+	sendWarningNotification(fullscan bool, message string, urgency string)
 	// RabbitMQBringConsumerBackAndPublishMessage() error
 	// RabbitMQBringConsumerBack() error
 	// RabbitMQPublishMessage() error
