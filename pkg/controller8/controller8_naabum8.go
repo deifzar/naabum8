@@ -64,8 +64,7 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 			// move on and call katanam8 scan
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan failed - Init runner options")
-			m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
-			notification8.PoolHelper.PublishSysErrorNotification("Naabum8Scan - Naabum8 Scan failed - Init runner options", "urgent", "naabum8")
+			m.handleNotificationErrorOnFullscan(true, "Naabum8Scan - Naabum8 Scan failed - Init runner options", "urgent")
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "failed", "msg": "Naabum8 Scan failed - Something wrong with the runner options"})
 			return
 		}
@@ -75,15 +74,13 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 			// move on and call katanam8 scan
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan - Failed to get the hostnames in scope.")
-			m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
-			notification8.PoolHelper.PublishSysErrorNotification("Naabum8Scan - Failed to get the hostnames in scope", "urgent", "naabum8")
+			m.handleNotificationErrorOnFullscan(true, "Naabum8Scan - Failed to get the hostnames in scope", "urgent")
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Naabum8 scan failed - Something wrong fetching the hostnames in scope."})
 			return
 		}
 		if len(hostname8ModelSlice) < 1 {
-			m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
-			notification8.PoolHelper.PublishSysWarningNotification("No targets in scope for a port scan. Make sure the client has enabled the scan on newly discovery assets.", "normal", "naabum8")
 			log8.BaseLogger.Info().Msg("Naabu8 scans success. No targets in scope.")
+			m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
 			c.JSON(http.StatusAccepted, gin.H{"status": "success", "msg": "Naabum8 scans success. No targets in scope."})
 			return
 		}
@@ -94,8 +91,7 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 		err = m.Orch.ActivateQueueByService("naabum8")
 		if err != nil {
 			log8.BaseLogger.Fatal().Msg("HTTP 500 Response - Naabum8 scans failed - Error bringing up the RabbitMQ queues for the Naabum8 service.")
-			m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
-			notification8.PoolHelper.PublishSysErrorNotification("Naabum8Scan - Error bringing up the RabbitMQ queues for the Naabum8 service", "urgent", "naabum8")
+			m.handleNotificationErrorOnFullscan(true, "Naabum8Scan - Error bringing up the RabbitMQ queues for the Naabum8 service", "urgent")
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Num8 Scans failed. Error bringing up the RabbitMQ queues for the Naabum8 service."})
 			return
 		}
@@ -215,8 +211,8 @@ func (m *Controller8Naabum8) Naabum8Hostnames(c *gin.Context) {
 	// Launch scan for the hostnames included in POST
 }
 
-// handleErrorOnFullscan handles errors when fullscan is true by publishing to RabbitMQ and sending error notifications
-func (m *Controller8Naabum8) handleErrorOnFullscan(fullscan bool, message string, urgency string) {
+// handleNotificationErrorOnFullscan handles errors when fullscan is true by publishing to RabbitMQ and sending error notifications
+func (m *Controller8Naabum8) handleNotificationErrorOnFullscan(fullscan bool, message string, urgency string) {
 	if fullscan {
 		publishingdetails := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Publisher")
 		m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
@@ -225,7 +221,7 @@ func (m *Controller8Naabum8) handleErrorOnFullscan(fullscan bool, message string
 }
 
 // sendWarningNotification sends warning notifications when fullscan is true (without RabbitMQ publishing)
-func (m *Controller8Naabum8) sendWarningNotification(fullscan bool, message string, urgency string) {
+func (m *Controller8Naabum8) sendWarningNotificationOnFullscan(fullscan bool, message string, urgency string) {
 	if fullscan {
 		notification8.PoolHelper.PublishSysWarningNotification(message, urgency, "naabum8")
 	}
@@ -385,7 +381,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 	if err != nil {
 		log8.BaseLogger.Debug().Stack().Msg(err.Error())
 		log8.BaseLogger.Error().Msg("Naabum8 validate options errors.")
-		m.handleErrorOnFullscan(fullscan, "runNaabu8 - validateOptions has failed", "normal")
+		m.handleNotificationErrorOnFullscan(fullscan, "runNaabu8 - validateOptions has failed", "normal")
 		return
 	}
 
@@ -396,7 +392,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 	if err != nil {
 		log8.BaseLogger.Debug().Stack().Msg(err.Error())
 		log8.BaseLogger.Error().Msg("Naabum8 runner error after trying to initialise it.")
-		m.handleErrorOnFullscan(fullscan, "runNaabu8 - newRunner has failed", "normal")
+		m.handleNotificationErrorOnFullscan(fullscan, "runNaabu8 - newRunner has failed", "normal")
 		return
 	}
 	defer naabuRunner.Close()
@@ -421,7 +417,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 
 		// Second run also failed, handle error
 		log8.BaseLogger.Error().Msg("Naabum8 scans failed on retry with ports 80,443.")
-		m.handleErrorOnFullscan(fullscan, "runNaabu8 - runEnumeration has failed on both attempts", "urgent")
+		m.handleNotificationErrorOnFullscan(fullscan, "runNaabu8 - runEnumeration has failed on both attempts", "urgent")
 		return
 	}
 	log8.BaseLogger.Info().Msg("Naabum8 scans have completed")
@@ -448,13 +444,13 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 			if err != nil {
 				log8.BaseLogger.Debug().Stack().Msg(err.Error())
 				log8.BaseLogger.Warn().Msg("HTTPx scan encountered an error")
-				m.sendWarningNotification(fullscan, "runNaabu8 - HTTPx scan failed", "normal")
+				m.sendWarningNotificationOnFullscan(fullscan, "runNaabu8 - HTTPx scan failed", "normal")
 			} else {
 				err = contrHttpx8.UpdateDB()
 				if err != nil {
 					log8.BaseLogger.Debug().Stack().Msg(err.Error())
 					log8.BaseLogger.Warn().Msg("Failed to update HTTP endpoints in the database")
-					m.sendWarningNotification(fullscan, "runNaabu8 - updating HTTP endpoints in DB failed", "normal")
+					m.sendWarningNotificationOnFullscan(fullscan, "runNaabu8 - updating HTTP endpoints in DB failed", "normal")
 				} else {
 					log8.BaseLogger.Info().Msg("HTTP endpoints successfully updated in DB")
 				}
@@ -467,13 +463,13 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 		if err != nil {
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Warn().Msg("Failed to read nmap output file: tmp/nmap-output.xml")
-			m.sendWarningNotification(fullscan, "runNaabu8 - error reading nmap output", "normal")
+			m.sendWarningNotificationOnFullscan(fullscan, "runNaabu8 - error reading nmap output", "normal")
 		} else {
 			nmapObj, err := utils.NmapParse(nmap)
 			if err != nil {
 				log8.BaseLogger.Debug().Stack().Msg(err.Error())
 				log8.BaseLogger.Warn().Msg("Failed to parse nmap output: tmp/nmap-output.xml")
-				m.sendWarningNotification(fullscan, "runNaabu8 - error parsing nmap output", "normal")
+				m.sendWarningNotificationOnFullscan(fullscan, "runNaabu8 - error parsing nmap output", "normal")
 			} else {
 				nmapOutput = nmapObj.Hosts
 			}
@@ -484,7 +480,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 		if err != nil {
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Warn().Msg("Failed to update services info from nmap results")
-			m.sendWarningNotification(fullscan, "runNaabu8 - error updating services info from nmap results", "normal")
+			m.sendWarningNotificationOnFullscan(fullscan, "runNaabu8 - error updating services info from nmap results", "normal")
 		} else {
 			log8.BaseLogger.Info().Msg("Services info extracted from nmap has been updated")
 		}
