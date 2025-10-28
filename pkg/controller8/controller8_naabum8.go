@@ -64,7 +64,7 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 			// move on and call katanam8 scan
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan failed - Init runner options")
-			m.handleNotificationErrorOnFullscan(true, "Naabum8Scan - Naabum8 Scan failed - Init runner options", "urgent")
+			m.handleNotificationErrorOnFullscan(true, "Naabum8Scan - Naabum8 Scan failed - Init runner options", "normal")
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "failed", "msg": "Naabum8 Scan failed - Something wrong with the runner options"})
 			return
 		}
@@ -74,7 +74,7 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 			// move on and call katanam8 scan
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan - Failed to get the hostnames in scope.")
-			m.handleNotificationErrorOnFullscan(true, "Naabum8Scan - Failed to get the hostnames in scope", "urgent")
+			m.handleNotificationErrorOnFullscan(true, "Naabum8Scan - Failed to get the hostnames in scope", "normal")
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Naabum8 scan failed - Something wrong fetching the hostnames in scope."})
 			return
 		}
@@ -91,7 +91,7 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 		err = m.Orch.ActivateQueueByService("naabum8")
 		if err != nil {
 			log8.BaseLogger.Fatal().Msg("HTTP 500 Response - Naabum8 scans failed - Error bringing up the RabbitMQ queues for the Naabum8 service.")
-			m.handleNotificationErrorOnFullscan(true, "Naabum8Scan - Error bringing up the RabbitMQ queues for the Naabum8 service", "urgent")
+			m.handleNotificationErrorOnFullscan(true, "Naabum8Scan - Error bringing up the RabbitMQ queues for the Naabum8 service", "normal")
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Num8 Scans failed. Error bringing up the RabbitMQ queues for the Naabum8 service."})
 			return
 		}
@@ -103,7 +103,7 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 		// move on and call katanam8 scan
 		log8.BaseLogger.Info().Msg("Naabum8 Scan API call forbidden")
 		m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
-		notification8.PoolHelper.PublishSysErrorNotification("Naabum8Scan - Launching Naabum8 Scan is not possible at this moment due to non-existent RabbitMQ queues.", "urgent", "naabum8")
+		notification8.PoolHelper.PublishSysErrorNotification("Naabum8Scan - Launching Naabum8 Scan is not possible at this moment due to non-existent RabbitMQ queues.", "normal", "naabum8")
 		c.JSON(http.StatusForbidden, gin.H{"status": "forbidden", "msg": "Num8 Scans failed - Launching Naabum8 Scan is not possible at this moment due to non-existent RabbitMQ queues."})
 		return
 	}
@@ -381,7 +381,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 	if err != nil {
 		log8.BaseLogger.Debug().Stack().Msg(err.Error())
 		log8.BaseLogger.Error().Msg("Naabum8 validate options errors.")
-		m.handleNotificationErrorOnFullscan(fullscan, "runNaabu8 - validateOptions has failed", "normal")
+		m.handleNotificationErrorOnFullscan(fullscan, "runNaabu8 - validateOptions has failed", "urgent")
 		return
 	}
 
@@ -392,7 +392,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 	if err != nil {
 		log8.BaseLogger.Debug().Stack().Msg(err.Error())
 		log8.BaseLogger.Error().Msg("Naabum8 runner error after trying to initialise it.")
-		m.handleNotificationErrorOnFullscan(fullscan, "runNaabu8 - newRunner has failed", "normal")
+		m.handleNotificationErrorOnFullscan(fullscan, "runNaabu8 - newRunner has failed", "urgent")
 		return
 	}
 	defer naabuRunner.Close()
