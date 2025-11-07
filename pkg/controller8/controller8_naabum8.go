@@ -376,9 +376,39 @@ func (m *Controller8Naabum8) initRunnerOptions() error {
 }
 
 func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
+	var scanCompleted bool = false
+	var scanFailed bool = false
+	// Ensure we always publish to exchange at the end if it's a full scan
+	if fullscan && !firstrun {
+		defer func() {
+			// Always publish, but with different payload based on status
+			var payload any = nil
+			// call naabum8 scan
+			if scanFailed {
+				payload = map[string]interface{}{
+					"status":  "warning",
+					"message": "NaabuM8 scan is showing warnings. Please, check!",
+				}
+			} else if !scanCompleted {
+				payload = map[string]interface{}{
+					"status":  "incomplete",
+					"message": "NaabuM8 scan did not complete. Unexpected errors.",
+				}
+			} else {
+				payload = map[string]interface{}{
+					"status":  "complete",
+					"message": "NaabuM8 scan run successfully!",
+				}
+			}
+			publishingdetails := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Publisher")
+			m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], payload, publishingdetails[2])
+			log8.BaseLogger.Info().Msg("Published message to RabbitMQ for next service (katanam8)")
+		}()
+	}
 	// Validate runner options
 	err := m.runnerOptions.ValidateOptions()
 	if err != nil {
+		scanFailed = true
 		log8.BaseLogger.Debug().Stack().Msg(err.Error())
 		log8.BaseLogger.Error().Msg("Naabum8 validate options errors.")
 		m.handleNotificationErrorOnFullscan(fullscan, "runNaabu8 - validateOptions has failed", "urgent")
@@ -390,6 +420,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 	// Initialize Naabu runner
 	naabuRunner, err := runner.NewRunner(m.runnerOptions)
 	if err != nil {
+		scanFailed = true
 		log8.BaseLogger.Debug().Stack().Msg(err.Error())
 		log8.BaseLogger.Error().Msg("Naabum8 runner error after trying to initialise it.")
 		m.handleNotificationErrorOnFullscan(fullscan, "runNaabu8 - newRunner has failed", "urgent")
@@ -414,7 +445,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 			m.runNaabu8(fullscan, false)
 			return
 		}
-
+		scanFailed = true
 		// Second run also failed, handle error
 		log8.BaseLogger.Error().Msg("Naabum8 scans failed on retry with ports 80,443.")
 		m.handleNotificationErrorOnFullscan(fullscan, "runNaabu8 - runEnumeration has failed on both attempts", "urgent")
@@ -442,12 +473,14 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 			contrHttpx8.InitRunnerOptions()
 			err = contrHttpx8.Run()
 			if err != nil {
+				scanFailed = true
 				log8.BaseLogger.Debug().Stack().Msg(err.Error())
 				log8.BaseLogger.Warn().Msg("HTTPx scan encountered an error")
 				m.sendWarningNotificationOnFullscan(fullscan, "runNaabu8 - HTTPx scan failed", "normal")
 			} else {
 				err = contrHttpx8.UpdateDB()
 				if err != nil {
+					scanFailed = true
 					log8.BaseLogger.Debug().Stack().Msg(err.Error())
 					log8.BaseLogger.Warn().Msg("Failed to update HTTP endpoints in the database")
 					m.sendWarningNotificationOnFullscan(fullscan, "runNaabu8 - updating HTTP endpoints in DB failed", "normal")
@@ -461,12 +494,14 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 		var nmapOutput []model8.Host
 		nmap, err := os.ReadFile("./tmp/nmap-output.xml")
 		if err != nil {
+			scanFailed = true
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Warn().Msg("Failed to read nmap output file: tmp/nmap-output.xml")
 			m.sendWarningNotificationOnFullscan(fullscan, "runNaabu8 - error reading nmap output", "normal")
 		} else {
 			nmapObj, err := utils.NmapParse(nmap)
 			if err != nil {
+				scanFailed = true
 				log8.BaseLogger.Debug().Stack().Msg(err.Error())
 				log8.BaseLogger.Warn().Msg("Failed to parse nmap output: tmp/nmap-output.xml")
 				m.sendWarningNotificationOnFullscan(fullscan, "runNaabu8 - error parsing nmap output", "normal")
@@ -478,6 +513,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 		// Update services info into DB from nmap results
 		err = m.updateServicesInfoFromNmapResults(nmapOutput)
 		if err != nil {
+			scanFailed = true
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Warn().Msg("Failed to update services info from nmap results")
 			m.sendWarningNotificationOnFullscan(fullscan, "runNaabu8 - error updating services info from nmap results", "normal")
@@ -485,14 +521,8 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 			log8.BaseLogger.Info().Msg("Services info extracted from nmap has been updated")
 		}
 	}
-
-	// Publish RabbitMQ message for katanam8 only if the Naabum8 scans are set as full
-	// This happens on successful completion (no errors) to trigger the next service
-	if fullscan {
-		publishingdetails := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Publisher")
-		m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
-		log8.BaseLogger.Info().Msg("Published message to RabbitMQ for next service (katanam8)")
-	}
+	// Scans have finished.
+	scanCompleted = true
 }
 
 func (m *Controller8Naabum8) updateServicesInfoFromNmapResults(nmapOutput []model8.Host) error {
