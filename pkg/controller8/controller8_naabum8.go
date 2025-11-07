@@ -385,7 +385,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 			var payload any = nil
 			// call naabum8 scan
 			if scanFailed {
-				/* DO NOTHING - Message already published */
+				/* DO NOTHING - Message already published with handleNotificationErrorOnFullscan */
 			} else if !scanCompleted {
 				payload = map[string]interface{}{
 					"status":  "incomplete",
