@@ -385,24 +385,24 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 			var payload any = nil
 			// call naabum8 scan
 			if scanFailed {
-				payload = map[string]interface{}{
-					"status":  "warning",
-					"message": "NaabuM8 scan is showing warnings. Please, check!",
-				}
+				/* DO NOTHING - Message already published */
 			} else if !scanCompleted {
 				payload = map[string]interface{}{
 					"status":  "incomplete",
 					"message": "NaabuM8 scan did not complete. Unexpected errors.",
 				}
+				publishingdetails := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Publisher")
+				m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], payload, publishingdetails[2])
+				log8.BaseLogger.Info().Msg("Published message to RabbitMQ for next service (katanam8)")
 			} else {
 				payload = map[string]interface{}{
 					"status":  "complete",
 					"message": "NaabuM8 scan run successfully!",
 				}
+				publishingdetails := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Publisher")
+				m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], payload, publishingdetails[2])
+				log8.BaseLogger.Info().Msg("Published message to RabbitMQ for next service (katanam8)")
 			}
-			publishingdetails := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Publisher")
-			m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], payload, publishingdetails[2])
-			log8.BaseLogger.Info().Msg("Published message to RabbitMQ for next service (katanam8)")
 		}()
 	}
 	// Validate runner options
