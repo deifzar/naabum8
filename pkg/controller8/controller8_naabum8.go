@@ -523,6 +523,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 	}
 	// Scans have finished.
 	scanCompleted = true
+	log8.BaseLogger.Info().Msgf("Naabum8 scans have completed successfully")
 }
 
 func (m *Controller8Naabum8) updateServicesInfoFromNmapResults(nmapOutput []model8.Host) error {
