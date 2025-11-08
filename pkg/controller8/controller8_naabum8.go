@@ -379,7 +379,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 	var scanCompleted bool = false
 	var scanFailed bool = false
 	// Ensure we always publish to exchange at the end if it's a full scan
-	if fullscan && !firstrun {
+	if fullscan {
 		defer func() {
 			// Always publish, but with different payload based on status
 			var payload any = nil
@@ -433,6 +433,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 	// Run the enumeration
 	err = naabuRunner.RunEnumeration(context.TODO())
 	if err != nil {
+		scanFailed = true
 		log8.BaseLogger.Debug().Stack().Msg(err.Error())
 		log8.BaseLogger.Error().Msg("Naabum8 runner error after trying to kick off.")
 
@@ -445,7 +446,6 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 			m.runNaabu8(fullscan, false)
 			return
 		}
-		scanFailed = true
 		// Second run also failed, handle error
 		log8.BaseLogger.Error().Msg("Naabum8 scans failed on retry with ports 80,443.")
 		m.handleNotificationErrorOnFullscan(fullscan, "runNaabu8 - runEnumeration has failed on both attempts", "urgent")
