@@ -417,7 +417,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 						notification8.PoolHelper.PublishSysErrorNotification(
 							"CRITICAL: Failed to notify katanam8 after NaabuM8 scan",
 							"urgent",
-							"asmm8",
+							"naabum8",
 						)
 					} else {
 						log8.BaseLogger.Info().Msg("Published message to RabbitMQ for next service (katanam8) - retry succeeded")
