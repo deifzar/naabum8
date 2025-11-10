@@ -197,7 +197,7 @@ func (o *Orchestrator8) activateConsumerByServiceWithReconnect(service string, c
 	cname := params[0] // ConsumeWithReconnect generate unique consumer name using this value as a prefix
 	autoACK, err := strconv.ParseBool(params[2])
 	if err != nil {
-		log8.BaseLogger.Warn().Msgf("setting autoACK to `false` due to failure parsing config autoACK value from queue `%s`", qname)
+		log8.BaseLogger.Warn().Msgf("setting autoACK to `true` due to failure parsing config autoACK value from queue `%s`", qname)
 		autoACK = true
 	}
 

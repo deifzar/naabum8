@@ -381,27 +381,50 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 	// Ensure we always publish to exchange at the end if it's a full scan
 	if fullscan {
 		defer func() {
+			// Recover from panic if any
+			if r := recover(); r != nil {
+				log8.BaseLogger.Error().Msgf("PANIC recovered in NaabuM8 scans: %v", r)
+				scanCompleted = false
+				scanFailed = true
+			}
 			// Always publish, but with different payload based on status
 			var payload any = nil
 			// call naabum8 scan
 			if scanFailed {
 				/* DO NOTHING - Message already published with handleNotificationErrorOnFullscan */
-			} else if !scanCompleted {
-				payload = map[string]interface{}{
-					"status":  "incomplete",
-					"message": "NaabuM8 scan did not complete. Unexpected errors.",
-				}
-				publishingdetails := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Publisher")
-				m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], payload, publishingdetails[2])
-				log8.BaseLogger.Info().Msg("Published message to RabbitMQ for next service (katanam8)")
 			} else {
-				payload = map[string]interface{}{
-					"status":  "complete",
-					"message": "NaabuM8 scan run successfully!",
+				if !scanCompleted {
+					payload = map[string]interface{}{
+						"status":  "incomplete",
+						"message": "NaabuM8 scan did not complete. Unexpected errors.",
+					}
+				} else {
+					payload = map[string]interface{}{
+						"status":  "complete",
+						"message": "NaabuM8 scan run successfully!",
+					}
 				}
 				publishingdetails := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Publisher")
-				m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], payload, publishingdetails[2])
-				log8.BaseLogger.Info().Msg("Published message to RabbitMQ for next service (katanam8)")
+				err := m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], payload, publishingdetails[2])
+				if err != nil {
+					log8.BaseLogger.Error().Msgf("Failed to publish to exchange: %v", err)
+					// Retry once after brief delay
+					time.Sleep(5 * time.Second)
+					retryErr := m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], payload, publishingdetails[2])
+					if retryErr != nil {
+						log8.BaseLogger.Error().Msgf("Retry failed: %v", retryErr)
+						// Last resort: urgent notification
+						notification8.PoolHelper.PublishSysErrorNotification(
+							"CRITICAL: Failed to notify katanam8 after NaabuM8 scan",
+							"urgent",
+							"asmm8",
+						)
+					} else {
+						log8.BaseLogger.Info().Msg("Published message to RabbitMQ for next service (katanam8) - retry succeeded")
+					}
+				} else {
+					log8.BaseLogger.Info().Msg("Published message to RabbitMQ for next service (katanam8)")
+				}
 			}
 		}()
 	}
@@ -444,7 +467,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 			// Clear previous results to start fresh
 			m.OutputResult = model8.NewModel8Result8()
 			m.runNaabu8(fullscan, false)
-			return
+			return // Add explicit return after retry
 		}
 		// Second run also failed, handle error
 		log8.BaseLogger.Error().Msg("Naabum8 scans failed on retry with ports 80,443.")
