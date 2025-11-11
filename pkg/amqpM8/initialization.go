@@ -51,7 +51,7 @@ func InitializeConnectionPool() error {
 		config.ConnectionTimeout = 30 * time.Second
 	}
 	if config.RetryAttempts == 0 {
-		config.RetryAttempts = 3
+		config.RetryAttempts = 10
 	}
 	if config.RetryDelay == 0 {
 		config.RetryDelay = 2 * time.Second

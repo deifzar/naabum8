@@ -80,7 +80,7 @@ func DefaultConnectionPoolConfig() ConnectionPoolConfig {
 		MaxLifetime:       2 * time.Hour,
 		HealthCheckPeriod: 30 * time.Minute,
 		ConnectionTimeout: 30 * time.Second,
-		RetryAttempts:     3,
+		RetryAttempts:     10,
 		RetryDelay:        2 * time.Second,
 	}
 }
