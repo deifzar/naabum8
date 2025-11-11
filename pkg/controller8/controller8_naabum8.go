@@ -462,10 +462,18 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 
 		// Retry with ports 80,443 only on first run
 		if firstrun {
-			log8.BaseLogger.Info().Msg("First run failed. Retrying Naabum8 scans with ports 80 and 443.")
-			m.runnerOptions.Ports = "80,443"
-			// Clear previous results to start fresh
+			log8.BaseLogger.Info().Msg("First run failed. Retrying Naabum8 scans with ports 22, 80 and 443.")
+
+			// CRITICAL: Explicitly close the failed runner before retry to prevent resource conflicts
+			naabuRunner.Close()
+
+			// Modify options and clear results for retry
+			m.runnerOptions.Ports = "22,80,443"
 			m.OutputResult = model8.NewModel8Result8()
+
+			// Small delay to ensure network resources are fully released
+			time.Sleep(100 * time.Millisecond)
+
 			m.runNaabu8(fullscan, false)
 			return // Add explicit return after retry
 		}
@@ -480,9 +488,17 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 	if firstrun && m.OutputResult.IsEmpty() {
 		log8.BaseLogger.Info().Msg("Naabum8 scans have completed with empty results")
 		log8.BaseLogger.Info().Msg("Retrying Naabum8 scans with only ports 80 and 443.")
+
+		// CRITICAL: Explicitly close the runner before retry to prevent resource conflicts
+		naabuRunner.Close()
+
+		// Modify options and clear results for retry
 		m.runnerOptions.Ports = "80,443"
-		// Clear previous results to start fresh
 		m.OutputResult = model8.NewModel8Result8()
+
+		// Small delay to ensure network resources are fully released
+		time.Sleep(100 * time.Millisecond)
+
 		m.runNaabu8(fullscan, false)
 		return
 	}
