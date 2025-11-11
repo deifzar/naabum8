@@ -327,6 +327,13 @@ func (w *PooledAmqp) DeleteQueue(queueName string) error {
 
 // CancelConsumer cancels a consumer
 func (w *PooledAmqp) CancelConsumer(consumerName string) error {
+	w.pooledConn.mu.Lock()
+	defer w.pooledConn.mu.Unlock()
+	if w.pooledConn.channel != nil || w.pooledConn.channel.IsClosed() {
+		log8.BaseLogger.Warn().Msgf("Channel is nil or closed, cannot cancel consumer with name %s", consumerName)
+		err := fmt.Errorf("channel is nil or closed, cannot cancel consumer with name %s", consumerName)
+		return err
+	}
 	err := w.pooledConn.channel.Cancel(consumerName, true)
 	if err != nil {
 		log8.BaseLogger.Debug().Msg(err.Error())
