@@ -13,6 +13,10 @@ type Orchestrator8Interface interface {
 	CreateHandleAPICallByService(service string) error
 	// New method that returns a dedicated connection with handler registered
 	createHandleAPICallByServiceWithConnection(service string) (amqpM8.PooledAmqpInterface, error)
+	// AckScanCompletion acknowledges a scan message based on completion status
+	AckScanCompletion(deliveryTag uint64, scanCompleted bool) error
+	// NackScanMessage rejects a scan message without requeue (send to DLQ if configured)
+	NackScanMessage(deliveryTag uint64, requeue bool) error
 	// New method that uses existing connection with auto-reconnect
 	activateConsumerByServiceWithReconnect(service string, conn amqpM8.PooledAmqpInterface) error
 	ActivateQueueByService(service string) error

@@ -451,16 +451,31 @@ func (w *PooledAmqp) ConsumeWithContext(ctx context.Context, consumerName, queue
 					if err := handler(msg); err != nil {
 						log8.BaseLogger.Error().Msgf("Handler error for queue `%s`: %v", queueName, err)
 						w.updateConsumerHealth(consumerName, true, 1, 1)
+
+						// If manual ACK mode, NACK the message on handler error
+						if !autoACK {
+							log8.BaseLogger.Warn().Msgf("Handler failed, NACKing message (deliveryTag: %d, requeue: true)", msg.DeliveryTag)
+							if nackErr := msg.Nack(false, true); nackErr != nil {
+								log8.BaseLogger.Error().Msgf("Failed to NACK message: %v", nackErr)
+							}
+						}
 					} else {
 						w.updateConsumerHealth(consumerName, true, 1, 0)
+						// SUCCESS - but DON'T ACK here!
+						// The Active() function will ACK via orchestrator after scan completes
+						log8.BaseLogger.Debug().Msgf("Handler succeeded, waiting for scan completion to ACK (deliveryTag: %d)", msg.DeliveryTag)
 					}
 				} else {
 					log8.BaseLogger.Warn().Msgf("No handler found for queue `%s`", queueName)
 					w.updateConsumerHealth(consumerName, true, 1, 1)
-				}
 
-				if !autoACK {
-					msg.Ack(false)
+					// No handler - NACK without requeue (permanent failure)
+					if !autoACK {
+						log8.BaseLogger.Error().Msgf("No handler found, NACKing message without requeue (deliveryTag: %d)", msg.DeliveryTag)
+						if nackErr := msg.Nack(false, false); nackErr != nil {
+							log8.BaseLogger.Error().Msgf("Failed to NACK message: %v", nackErr)
+						}
+					}
 				}
 			}
 		}

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 
@@ -114,24 +115,58 @@ func (o *Orchestrator8) createHandleAPICallByServiceWithConnection(service strin
 		log8.BaseLogger.Info().Msgf("RabbitMQ - Message received with routing key '%s'", routingKey)
 		requestURL := fmt.Sprintf("%s/%s", services[instructions[1]], instructions[3])
 		httpMethod := strings.ToLower(instructions[2])
+
+		// Create HTTP client with context to pass the delivery message
+		client := &http.Client{Timeout: 300 * time.Second} // 5 minute timeout for long scans
+
+		var req *http.Request
+		var err error
+
 		switch httpMethod {
 		case "get":
-			_, err := http.Get(requestURL)
+			req, err = http.NewRequest("GET", requestURL, nil)
+			if err != nil {
+				log8.BaseLogger.Error().Msgf("Failed to create request: %v", err)
+				return err
+			}
+
+			// Add custom header with delivery tag for acknowledgment tracking
+			req.Header.Set("X-RabbitMQ-Delivery-Tag", fmt.Sprintf("%d", msg.DeliveryTag))
+			req.Header.Set("X-RabbitMQ-Consumer-Tag", msg.ConsumerTag)
+
+			resp, err := client.Do(req)
 			if err != nil {
 				log8.BaseLogger.Debug().Msg(err.Error())
 				log8.BaseLogger.Warn().Msgf("rabbitMQ - handler for routing key `%s` - Error making the HTTP request: %s.", routingKey, requestURL)
+				// Return error but DON'T requeue - the API endpoint will handle it via defer
 				return err
 			}
+			defer resp.Body.Close()
+
 		case "post":
+
 			reader := bytes.NewReader(msg.Body)
-			_, err := http.Post(requestURL, "application/json", reader)
+			req, err = http.NewRequest("POST", requestURL, reader)
+			if err != nil {
+				log8.BaseLogger.Error().Msgf("Failed to create request: %v", err)
+				return err
+			}
+
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-RabbitMQ-Delivery-Tag", fmt.Sprintf("%d", msg.DeliveryTag))
+			req.Header.Set("X-RabbitMQ-Consumer-Tag", msg.ConsumerTag)
+
+			resp, err := client.Do(req)
 			if err != nil {
 				log8.BaseLogger.Debug().Msg(err.Error())
 				log8.BaseLogger.Warn().Msgf("rabbitMQ - handler for routing key `%s` - Error making the HTTP request: %s.", routingKey, requestURL)
 				return err
 			}
+			defer resp.Body.Close()
+
 		default:
 			log8.BaseLogger.Warn().Msgf("rabbitMQ - handler for routing key `%s` - Empty HTTP request.", routingKey)
+			return fmt.Errorf("unsupported HTTP method: %s", httpMethod)
 		}
 		log8.BaseLogger.Info().Msgf("RabbitMQ - handler for routing key `%s` - Success with HTTP request: %s.", routingKey, requestURL)
 		return nil
@@ -150,6 +185,39 @@ func (o *Orchestrator8) createHandleAPICallByServiceWithConnection(service strin
 	log8.BaseLogger.Info().Msgf("Handler registered for queue `%s` on dedicated connection", queue)
 
 	return am8, nil
+}
+
+// AckScanCompletion acknowledges a scan message based on completion status
+func (o *Orchestrator8) AckScanCompletion(deliveryTag uint64, scanCompleted bool) error {
+	return amqpM8.WithPooledConnection(func(conn amqpM8.PooledAmqpInterface) error {
+		ch := conn.GetChannel()
+		if ch == nil {
+			return fmt.Errorf("channel is nil, cannot acknowledge message")
+		}
+
+		if !scanCompleted {
+			// Scan didn't complete (crashed, panic, SIGTERM) - NACK and requeue
+			log8.BaseLogger.Warn().Msgf("Scan incomplete (deliveryTag: %d) - sending NACK with requeue", deliveryTag)
+			return ch.Nack(deliveryTag, false, true) // requeue=true
+		}
+
+		// Scan completed successfully - ACK
+		log8.BaseLogger.Info().Msgf("Scan completed successfully (deliveryTag: %d) - sending ACK", deliveryTag)
+		return ch.Ack(deliveryTag, false)
+	})
+}
+
+// NackScanMessage rejects a scan message without requeue (send to DLQ if configured)
+func (o *Orchestrator8) NackScanMessage(deliveryTag uint64, requeue bool) error {
+	return amqpM8.WithPooledConnection(func(conn amqpM8.PooledAmqpInterface) error {
+		ch := conn.GetChannel()
+		if ch == nil {
+			return fmt.Errorf("channel is nil, cannot nack message")
+		}
+
+		log8.BaseLogger.Warn().Msgf("Rejecting message (deliveryTag: %d, requeue: %v)", deliveryTag, requeue)
+		return ch.Nack(deliveryTag, false, requeue)
+	})
 }
 
 func (o *Orchestrator8) ActivateQueueByService(service string) error {
@@ -197,8 +265,8 @@ func (o *Orchestrator8) activateConsumerByServiceWithReconnect(service string, c
 	cname := params[0] // ConsumeWithReconnect generate unique consumer name using this value as a prefix
 	autoACK, err := strconv.ParseBool(params[2])
 	if err != nil {
-		log8.BaseLogger.Warn().Msgf("setting autoACK to `true` due to failure parsing config autoACK value from queue `%s`", qname)
-		autoACK = true
+		log8.BaseLogger.Warn().Msgf("setting autoACK to `false` due to failure parsing config autoACK value from queue `%s`", qname)
+		autoACK = false
 	}
 
 	err = conn.ConsumeWithReconnect(ctx, cname, qname, autoACK)

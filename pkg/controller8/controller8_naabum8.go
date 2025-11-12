@@ -50,9 +50,18 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 		log8.BaseLogger.Error().Err(err).Msg("Failed to cleanup tmp directory")
 		// Don't return error here as cleanup failure shouldn't prevent startup
 	}
+	// Extract delivery tag from request header (set by RabbitMQ handler)
+	deliveryTagStr := c.GetHeader("X-RabbitMQ-Delivery-Tag")
+	var deliveryTag uint64
+	if deliveryTagStr != "" {
+		if tag, err := strconv.ParseUint(deliveryTagStr, 10, 64); err == nil {
+			deliveryTag = tag
+			log8.BaseLogger.Debug().Msgf("Scan triggered via RabbitMQ (deliveryTag: %d)", deliveryTag)
+		}
+	}
+
 	// Check that RabbitMQ relevant Queue is available.
 	// If relevant queue does not exist, inform the user that there is one Naabum8 running at this moment and advise the user to wait for the latest results.
-
 	queue_consumer := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Queue")
 	qargs_consumer := m.Config.GetStringMap("ORCHESTRATORM8.naabum8.Queue-arguments")
 	publishingdetails := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Publisher")
@@ -65,6 +74,11 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan failed - Init runner options")
 			m.handleNotificationErrorOnFullscan(true, "Naabum8Scan - Naabum8 Scan failed - Init runner options", "normal")
+			// ACK the message since we're not going to retry
+			if deliveryTag > 0 {
+				m.Orch.AckScanCompletion(deliveryTag, true) // Mark as "completed" even though it failed early
+				// OR use: m.Orch.NackScanMessage(deliveryTag, false) // Don't requeue - permanent failure
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "failed", "msg": "Naabum8 Scan failed - Something wrong with the runner options"})
 			return
 		}
@@ -75,12 +89,22 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 			log8.BaseLogger.Debug().Stack().Msg(err.Error())
 			log8.BaseLogger.Info().Msg("500 HTTP Response - Naabum8 Scan - Failed to get the hostnames in scope.")
 			m.handleNotificationErrorOnFullscan(true, "Naabum8Scan - Failed to get the hostnames in scope", "normal")
+			// ACK the message since we're not going to retry
+			if deliveryTag > 0 {
+				m.Orch.AckScanCompletion(deliveryTag, true) // Mark as "completed" even though it failed early
+				// OR use: m.Orch.NackScanMessage(deliveryTag, false) // Don't requeue - permanent failure
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Naabum8 scan failed - Something wrong fetching the hostnames in scope."})
 			return
 		}
 		if len(hostname8ModelSlice) < 1 {
 			log8.BaseLogger.Info().Msg("Naabu8 scans success. No targets in scope.")
 			m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
+			// ACK the message since we're not going to retry
+			if deliveryTag > 0 {
+				m.Orch.AckScanCompletion(deliveryTag, true) // Mark as "completed" even though it failed early
+				// OR use: m.Orch.NackScanMessage(deliveryTag, false) // Don't requeue - permanent failure
+			}
 			c.JSON(http.StatusAccepted, gin.H{"status": "success", "msg": "Naabum8 scans success. No targets in scope."})
 			return
 		}
@@ -92,18 +116,27 @@ func (m *Controller8Naabum8) Naabum8Scan(c *gin.Context) {
 		if err != nil {
 			log8.BaseLogger.Fatal().Msg("HTTP 500 Response - Naabum8 scans failed - Error bringing up the RabbitMQ queues for the Naabum8 service.")
 			m.handleNotificationErrorOnFullscan(true, "Naabum8Scan - Error bringing up the RabbitMQ queues for the Naabum8 service", "normal")
+			// ACK the message since we're not going to retry
+			if deliveryTag > 0 {
+				m.Orch.AckScanCompletion(deliveryTag, true) // Mark as "completed" even though it failed early
+				// OR use: m.Orch.NackScanMessage(deliveryTag, false) // Don't requeue - permanent failure
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Num8 Scans failed. Error bringing up the RabbitMQ queues for the Naabum8 service."})
 			return
 		}
 		log8.BaseLogger.Info().Msg("Naabum8 scans API call success")
 		c.JSON(http.StatusOK, gin.H{"msg": "Naabum8 scans success ... Check notifications for scans updates."})
 		// scan
-		go m.runNaabu8(true, true)
+		go m.runNaabu8(true, true, deliveryTag)
 	} else {
 		// move on and call katanam8 scan
 		log8.BaseLogger.Info().Msg("Naabum8 Scan API call forbidden")
 		m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], nil, publishingdetails[2])
 		notification8.PoolHelper.PublishSysErrorNotification("Naabum8Scan - Launching Naabum8 Scan is not possible at this moment due to non-existent RabbitMQ queues.", "normal", "naabum8")
+		// If this was a RabbitMQ-triggered scan, NACK it since we can't process
+		if deliveryTag > 0 {
+			m.Orch.NackScanMessage(deliveryTag, false) // Don't requeue - permanent config issue
+		}
 		c.JSON(http.StatusForbidden, gin.H{"status": "forbidden", "msg": "Num8 Scans failed - Launching Naabum8 Scan is not possible at this moment due to non-existent RabbitMQ queues."})
 		return
 	}
@@ -161,7 +194,7 @@ func (m *Controller8Naabum8) Naabum8Domain(c *gin.Context) {
 	// Launch scan for all hostnames under the inquired domanin
 	c.JSON(http.StatusOK, gin.H{"status": "success", "data": nil, "msg": "OK! Launching port scans ... Check notifications for scans updates."})
 	log8.BaseLogger.Info().Msg("Launching port scans across one domain.")
-	go m.runNaabu8(false, true)
+	go m.runNaabu8(false, true, 0)
 }
 
 // Launch port scan across the hostnames submitted in the POST body
@@ -207,7 +240,7 @@ func (m *Controller8Naabum8) Naabum8Hostnames(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"msg": "OK! Launching port scans ... Check notifications for scans updates."})
 	log8.BaseLogger.Info().Msg("Launching port scans across specific hostnames.")
-	go m.runNaabu8(false, true)
+	go m.runNaabu8(false, true, 0)
 	// Launch scan for the hostnames included in POST
 }
 
@@ -375,7 +408,7 @@ func (m *Controller8Naabum8) initRunnerOptions() error {
 	return err
 }
 
-func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
+func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool, deliveryTag uint64) {
 	var scanCompleted bool = false
 	var scanFailed bool = false
 	// Ensure we always publish to exchange at the end if it's a full scan
@@ -405,9 +438,9 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 					}
 				}
 				publishingdetails := m.Config.GetStringSlice("ORCHESTRATORM8.naabum8.Publisher")
-				err := m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], payload, publishingdetails[2])
-				if err != nil {
-					log8.BaseLogger.Error().Msgf("Failed to publish to exchange: %v", err)
+				pubErr := m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], payload, publishingdetails[2])
+				if pubErr != nil {
+					log8.BaseLogger.Error().Msgf("Failed to publish to exchange: %v", pubErr)
 					// Retry once after brief delay
 					time.Sleep(5 * time.Second)
 					retryErr := m.Orch.PublishToExchange(publishingdetails[0], publishingdetails[1], payload, publishingdetails[2])
@@ -419,11 +452,16 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 							"urgent",
 							"naabum8",
 						)
-					} else {
-						log8.BaseLogger.Info().Msg("Published message to RabbitMQ for next service (katanam8) - retry succeeded")
 					}
 				} else {
 					log8.BaseLogger.Info().Msg("Published message to RabbitMQ for next service (katanam8)")
+				}
+			}
+			// ACK or NACK the RabbitMQ message if deliveryTag is set
+			if deliveryTag > 0 {
+				ackErr := m.Orch.AckScanCompletion(deliveryTag, scanCompleted)
+				if ackErr != nil {
+					log8.BaseLogger.Error().Msgf("Failed to ACK/NACK message (deliveryTag: %d): %v", deliveryTag, ackErr)
 				}
 			}
 		}()
@@ -474,7 +512,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 			// Small delay to ensure network resources are fully released
 			time.Sleep(100 * time.Millisecond)
 
-			m.runNaabu8(fullscan, false)
+			m.runNaabu8(fullscan, false, deliveryTag)
 			return // Add explicit return after retry
 		}
 		// Second run also failed, handle error
@@ -499,7 +537,7 @@ func (m *Controller8Naabum8) runNaabu8(fullscan bool, firstrun bool) {
 		// Small delay to ensure network resources are fully released
 		time.Sleep(100 * time.Millisecond)
 
-		m.runNaabu8(fullscan, false)
+		m.runNaabu8(fullscan, false, deliveryTag)
 		return
 	}
 
