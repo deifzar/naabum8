@@ -70,6 +70,8 @@ var launchCmd = &cobra.Command{
 			a.InitializeConsumerAfterReady()
 			a.Run(address)
 			log8.BaseLogger.Info().Msg("API service successfully running in " + address)
+			// Cleanup when server stops
+			log8.BaseLogger.Info().Msg("API service stopped, cleaning up connection pool...")
 			amqpM8.CleanupConnectionPool()
 			return nil
 		}
