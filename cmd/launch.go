@@ -4,11 +4,16 @@ Copyright © 2024 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	"deifzar/naabum8/pkg/amqpM8"
 	"deifzar/naabum8/pkg/api8"
 	"deifzar/naabum8/pkg/log8"
+	"deifzar/naabum8/pkg/notification8"
 	"deifzar/naabum8/pkg/utils"
 	"errors"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 )
@@ -41,16 +46,32 @@ var launchCmd = &cobra.Command{
 				return errors.New("port number between 8000 and 8999")
 			}
 			address := ipFlag + ":" + fmt.Sprint(portFlag)
+
+			// Set up graceful shutdown (connection pool will be initialized by api8.Init())
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+			go func() {
+				<-sigChan
+				log8.BaseLogger.Info().Msg("Shutdown signal received, cleaning up...")
+				amqpM8.CleanupConnectionPool()
+				os.Exit(0)
+			}()
+
 			var a api8.Api8
 			err := a.Init()
 			if err != nil {
 				log8.BaseLogger.Debug().Stack().Msg(err.Error())
 				log8.BaseLogger.Fatal().Msg("Error in `Launch` command line when initialising the API endpoint.")
+				notification8.PoolHelper.PublishSysErrorNotification("Error in `NaabuM8 Launch` command line when initialising the API endpoint", "urgent", "naabum8")
 				return err
 			}
 			a.Routes()
+			// Start goroutine to initialize consumer after API becomes ready
+			a.InitializeConsumerAfterReady()
 			a.Run(address)
-			log8.BaseLogger.Info().Msg("API service successfully running in " + address)
+			// Cleanup when server stops
+			log8.BaseLogger.Info().Msg("API service stopped, cleaning up connection pool...")
+			amqpM8.CleanupConnectionPool()
 			return nil
 		}
 	},

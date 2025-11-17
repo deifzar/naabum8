@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"deifzar/naabum8/pkg/log8"
 	"fmt"
-
+	"time"
 	_ "github.com/lib/pq"
 )
 
@@ -57,10 +57,21 @@ func (d *Db8) GetConnectionString() string {
 }
 
 func (d *Db8) OpenConnection() (*sql.DB, error) {
-	db, err := sql.Open("postgres", d.GetConnectionString())
-	if err != nil {
-		log8.BaseLogger.Debug().Stack().Msg(err.Error())
-		return nil, err
+	var db *sql.DB
+	for retries := 0; retries < 10; retries++ {
+		log8.BaseLogger.Info().Msg("Connecting to Database server ...")
+		c, err := sql.Open("postgres", d.GetConnectionString())
+		if err == nil {
+			db = c
+			break // Connection successful
+		}
+		if retries == 9 {
+			log8.BaseLogger.Debug().Msg(err.Error())
+			return nil, err
+		}
+		log8.BaseLogger.Warn().Msgf("Failed to connect to Database (attempt %d/10): %v", retries+1, err)
+		time.Sleep(5 * time.Second)
+
 	}
 	return db, nil
 }

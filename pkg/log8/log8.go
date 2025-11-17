@@ -19,19 +19,27 @@ var once sync.Once
 var BaseLogger zerolog.Logger
 
 // NewLogger initializes the standard logger
-func GetLogger() zerolog.Logger {
+func GetLogger(logFilePath string) zerolog.Logger {
 
 	once.Do(func() {
 		zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 		zerolog.TimeFieldFormat = time.RFC3339Nano
 
+		os.MkdirAll("log", 0750)
+
 		fileLogger := &lumberjack.Logger{
-			Filename:   "log/naabum8.log",
+			Filename:   "log/" + logFilePath,
 			MaxSize:    100, //
 			MaxBackups: 3,
 			// MaxAge:     14,
 			Compress: false,
 		}
+
+		// Force the log file to have 0640 permissions
+		// This overrides lumberjack's default 0600
+		// Need 640 permissions for vector to be able read
+		os.Chmod(logFilePath, 0640)
+
 		var output io.Writer = zerolog.ConsoleWriter{
 			Out:        fileLogger,
 			TimeFormat: time.RFC3339,

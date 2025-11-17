@@ -18,9 +18,11 @@ package main
 import (
 	"deifzar/naabum8/cmd"
 	"deifzar/naabum8/pkg/log8"
+	"syscall"
 )
 
 func main() {
-	log8.GetLogger()
+	syscall.Umask(0027) // Files: 640, Dirs: 750
+	log8.GetLogger("naabum8.log")
 	cmd.Execute()
 }
