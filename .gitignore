@@ -2,10 +2,16 @@
 /naabum8
 
 # configuration files
-/configuration.yaml
+configs/*
+!configs/.gitkeep
+!configs/configuration_template.yaml
+!configs/examples/
 
 # other session files
 resume.cfg
+
+# app folder
+app/*
 
 # bin folder
 bin/*
@@ -25,3 +31,6 @@ tmp/*
 # discord
 discord/*
 
+# AI
+.claude/*
+CLAUDE.md
