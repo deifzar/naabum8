@@ -1,0 +1,124 @@
+APP_ENV: DEV # DEV,TEST,PROD (DEV and TEST print logs in CMD screen)
+LOG_LEVEL: "0"
+# panic (zerolog.PanicLevel, 5)
+# fatal (zerolog.FatalLevel, 4)
+# error (zerolog.ErrorLevel, 3)
+# warn (zerolog.WarnLevel, 2)
+# info (zerolog.InfoLevel, 1)
+# debug (zerolog.DebugLevel, 0)
+# trace (zerolog.TraceLevel, -1)
+ORCHESTRATORM8:
+  Services:
+    naabum8: "${NAABUM8_URL}"
+    katanam8: "${KATANAM8_URL}"
+  Exchanges:
+    cptm8: "topic" # exchange_name:exchange_type
+    notification: "topic"
+  naabum8: # service name
+    Queue:
+      - "cptm8" # exchange name
+      - "qnaabum8" # queue name
+      - 1 # prefetch count
+    Routing-keys:
+      - "cptm8.naabum8.#" # binding key
+    Queue-arguments:
+      "x-max-length": 1 # x-queue-type, x-max-length, x-max-length-bytes, x-overflow, x-message-ttl, x-expires, x-max-age, x-stream-max-segment-size-bytes, x-queue-version, x-consumer-timeout, x-single-active-consumer
+      "x-overflow": "reject-publish"
+    Consumer:
+      - "qnaabum8" # queue name
+      - "cnaabum8" # consumer name
+      - "false" # autoack
+    Publisher: # This the default published message
+      - "cptm8" # exchange
+      - "cptm8.katanam8.get.scan" # Routing key
+      - "naabum8" # caller service
+NAABUM8:
+  Verbose: false
+  NoColor: true
+  JSON: true
+  Silent: 
+  Stdin: 
+  Verify: 
+  Version: 
+  Ping: 
+  Debug: 
+  ExcludeCDN: true
+  Nmap: 
+  InterfacesList: 
+  Retries: 1
+  Rate: 1000
+  Timeout: 1000
+  WarmUpTime: 2
+  Host:
+  HostsFile:
+  Output:
+  Ports: "21,23,22,80,443,8080,8443"
+  PortsFile:
+  ExcludePorts:
+  ExcludeIps:
+  ExcludeIpsFile:
+  TopPorts:
+  PortThreshold:
+  SourceIP:
+  SourcePort:
+  Interface:
+  ConfigFile:
+  Threads: 25
+  EnableProgressBar:
+  StatsInterval:
+  ScanAllIPS: false
+  IPVersion: 
+    - 4
+  ScanType: s
+  NmapCLI: 'nmap -sV -oX ./tmp/nmap-output.xml'
+  # Proxy: 'IP_address:port'
+  Proxy: 
+  #ProxyAuth: 'user:pass'
+  ProxyAuth:
+  Resolvers:
+  baseResolvers: 
+  OnResult:
+  CSV:
+  Resume:
+  ResumeCfg:
+  Stream:
+  Passive:
+  OutputCDN:
+  HealthCheck: 
+  OnlyHostDiscovery: 
+  SkipHostDiscovery: 
+  TcpSynPingProbes:
+  TcpAckPingProbes:
+  IcmpEchoRequestProbe:
+  IcmpTimestampRequestProbe:
+  IcmpAddressMaskRequestProbe:
+  ArpPing:
+  IPv6NeighborDiscoveryPing:
+  InputReadTimeout:
+  DisableStdin:
+  ServiceDiscovery:
+  ServiceVersion:
+  ReversePTR:
+  DisableUpdateCheck:
+  MetricsPort:
+Database:
+  location: "${POSTGRESQL_HOSTNAME}"
+  port: 5432
+  schema: "public"
+  database: "${POSTGRESQL_DB}"
+  username: "${POSTGRESQL_USERNAME}"
+  password: "${POSTGRESQL_PASSWORD}"
+RabbitMQ:
+  location: "${RABBITMQ_HOSTNAME}"
+  port: 5672
+  username: "${RABBITMQ_USERNAME}"
+  password: "${RABBITMQ_PASSWORD}"
+  pool:
+    max_connections:
+    min_connections:
+    pool.max_idle_time:
+    max_lifetime:
+    health_check_period:
+    connection_timeout:
+    retry_attempts: 10
+    retry_delay: 5 # seconds
